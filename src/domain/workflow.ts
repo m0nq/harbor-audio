@@ -1,9 +1,12 @@
 import type {
   ConversionJob,
   ConversionStatus,
+  FixtureQueueProjection,
+  FixtureQueueView,
   QueueFilter,
   QueueItem,
   QueueQuery,
+  QueueSummary,
   WorkflowSnapshot,
 } from "./contracts.js";
 
@@ -17,8 +20,8 @@ export function filterQueueItems(items: QueueItem[], query: QueueQuery): QueueIt
   });
 }
 
-export function summarizeQueue(items: QueueItem[]): Record<ConversionStatus | "total", number> {
-  const summary: Record<ConversionStatus | "total", number> = {
+export function summarizeQueue(items: QueueItem[]): QueueSummary {
+  const summary: QueueSummary = {
     total: items.length,
     waiting: 0,
     analyzing: 0,
@@ -32,6 +35,27 @@ export function summarizeQueue(items: QueueItem[]): Record<ConversionStatus | "t
   }
 
   return summary;
+}
+
+const fixtureQueueViewStatuses: Record<FixtureQueueView, readonly ConversionStatus[]> = {
+  converting: ["waiting", "analyzing", "converting", "failed"],
+  converted: ["converted"],
+};
+
+export function projectQueueView(
+  snapshot: WorkflowSnapshot,
+  view: FixtureQueueView,
+  query: QueueQuery,
+): FixtureQueueProjection {
+  const eligibleStatuses = fixtureQueueViewStatuses[view];
+  const viewItems = snapshot.queueItems.filter((item) => eligibleStatuses.includes(item.status));
+
+  return {
+    view,
+    viewItems,
+    visibleItems: filterQueueItems(viewItems, query),
+    summary: summarizeQueue(viewItems),
+  };
 }
 
 export function findJob(snapshot: WorkflowSnapshot, queueItemId: string): ConversionJob | undefined {

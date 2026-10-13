@@ -1,5 +1,5 @@
-import type { QueueFilter, QueueQuery, WorkflowSnapshot } from "../domain/contracts.js";
-import { filterLabels, filterQueueItems, findJob, summarizeQueue, toQueueRowViewModel } from "../domain/workflow.js";
+import type { FixtureQueueProjection, FixtureView, QueueFilter, QueueQuery, WorkflowSnapshot } from "../domain/contracts.js";
+import { filterLabels, findJob, projectQueueView, toQueueRowViewModel } from "../domain/workflow.js";
 
 declare global {
   interface Window {
@@ -10,7 +10,7 @@ declare global {
 }
 
 let snapshot: WorkflowSnapshot | undefined;
-let activeView: "browser" | "converting" | "converted" = "browser";
+let activeView: FixtureView = "browser";
 let query: QueueQuery = { filter: "all", search: "" };
 
 function escapeHtml(value: string): string {
@@ -27,13 +27,7 @@ function renderShell(): void {
   const app = document.querySelector<HTMLDivElement>("#app");
   if (!app || !snapshot) return;
 
-  const summary = summarizeQueue(snapshot.queueItems);
-  const filtered = activeView === "browser"
-    ? []
-    : filterQueueItems(snapshot.queueItems, {
-        ...query,
-        filter: activeView === "converted" ? "converted" : query.filter,
-      });
+  const projection = activeView === "browser" ? undefined : projectQueueView(snapshot, activeView, query);
 
   app.innerHTML = `
     <aside class="sidebar">
@@ -54,7 +48,7 @@ function renderShell(): void {
         <div><div class="eyebrow">Workflow parity lab</div><h1>${activeView === "browser" ? "Browse a local source" : activeView === "converting" ? "Conversion queue" : "Completed items"}</h1><p class="intro">A bounded desktop shell for inspecting known and unknown workflow states.</p></div>
         <div class="baseline">capture ${escapeHtml("fixture-baseline-2026-10-12")}</div>
       </div>
-      ${activeView === "browser" ? renderBrowser() : renderQueue(filtered, summary)}
+      ${projection ? renderQueue(projection) : renderBrowser()}
     </main>
   `;
 
@@ -77,10 +71,13 @@ function renderBrowser(): string {
   `;
 }
 
-function renderQueue(items: ReturnType<typeof filterQueueItems>, summary: ReturnType<typeof summarizeQueue>): string {
+function renderQueue(projection: FixtureQueueProjection): string {
+  const { view, visibleItems: items, summary } = projection;
+  const isConverted = view === "converted";
+
   return `
-    <div class="section-heading"><div><h2>${activeView === "converted" ? "Converted" : "Converting"}</h2><p>${summary.total} fixture jobs · ${summary.failed} failed · ${summary.converted} converted</p></div><span class="fixture-badge">local only</span></div>
-    <section class="queue-card" aria-label="${activeView === "converted" ? "Converted" : "Converting"} fixture list">
+    <div class="section-heading"><div><h2>${isConverted ? "Converted" : "Converting"}</h2><p>${summary.total} fixture job${summary.total === 1 ? "" : "s"} · ${summary.failed} failed · ${summary.converted} converted</p></div><span class="fixture-badge">local only</span></div>
+    <section class="queue-card" aria-label="${isConverted ? "Converted" : "Converting"} fixture list">
       <div class="queue-toolbar"><select class="filter-select" id="filter" aria-label="Filter items">${Object.entries(filterLabels).map(([value, label]) => `<option value="${value}" ${query.filter === value ? "selected" : ""}>${label}</option>`).join("")}</select><input class="search" id="search" type="search" placeholder="Search fixture library" value="${escapeHtml(query.search)}" /><span class="toolbar-spacer"></span><span class="fixture-badge">fixture</span></div>
       ${items.length === 0 ? `<div class="empty">No fixture rows match this view.</div>` : `<table class="queue-table"><thead><tr><th>Title</th><th>Creator</th><th>Collection</th><th>Duration</th><th>Status</th></tr></thead><tbody>${items.map((item) => { const row = toQueueRowViewModel(item, findJob(snapshot as WorkflowSnapshot, item.id)); return `<tr><td>${escapeHtml(row.title)}</td><td>${escapeHtml(row.creator)}</td><td>${escapeHtml(row.collection)}</td><td>${escapeHtml(row.duration)}</td><td><span class="status ${item.status}">${escapeHtml(row.statusLabel)}</span></td></tr>`; }).join("")}</tbody></table>`}
       <div class="unknown-note">Retry and cancellation affordances are unknown in the captured workflow. No action controls are exposed in fixture mode.</div>
@@ -93,7 +90,7 @@ function wireEvents(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
     button.addEventListener("click", () => {
       activeView = button.dataset.view as typeof activeView;
-      query = { filter: activeView === "converted" ? "converted" : "all", search: "" };
+      query = { ...query, filter: "all" };
       renderShell();
     });
   });

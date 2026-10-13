@@ -82,6 +82,7 @@ export interface WorkflowSnapshot {
 }
 
 export type FixtureView = "browser" | "converting" | "converted";
+export type FixtureQueueView = Exclude<FixtureView, "browser">;
 export type FilterControl = "status-filter" | "search";
 
 export interface FixtureParityState {
@@ -97,6 +98,15 @@ export interface FixtureParityState {
 }
 
 export type QueueFilter = "all" | ConversionStatus;
+
+export type QueueSummary = Record<ConversionStatus | "total", number>;
+
+export interface FixtureQueueProjection {
+  view: FixtureQueueView;
+  viewItems: QueueItem[];
+  visibleItems: QueueItem[];
+  summary: QueueSummary;
+}
 
 export interface QueueQuery {
   filter: QueueFilter;

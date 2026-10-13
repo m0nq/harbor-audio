@@ -78,6 +78,66 @@ test("Search composes with fixture status filters and normalizes the query", () 
   );
 });
 
+test("fixture queue projections scope converting and converted views in source order", () => {
+  const converting = workflow.projectQueueView(fixtureSnapshot, "converting", { filter: "all", search: "" });
+  const converted = workflow.projectQueueView(fixtureSnapshot, "converted", { filter: "all", search: "" });
+
+  assert.equal(converting.view, "converting");
+  assert.deepEqual(converting.viewItems.map((item) => item.id), ["queue-aurora", "queue-blue-hour"]);
+  assert.deepEqual(converting.visibleItems.map((item) => item.id), ["queue-aurora", "queue-blue-hour"]);
+  assert.equal(converted.view, "converted");
+  assert.deepEqual(converted.viewItems.map((item) => item.id), ["queue-lantern"]);
+  assert.deepEqual(converted.visibleItems.map((item) => item.id), ["queue-lantern"]);
+});
+
+test("fixture queue projections compose status and Search filters inside the active view", () => {
+  assert.deepEqual(
+    workflow.projectQueueView(fixtureSnapshot, "converting", { filter: "failed", search: "" }).visibleItems.map((item) => item.id),
+    ["queue-blue-hour"],
+  );
+  assert.deepEqual(
+    workflow.projectQueueView(fixtureSnapshot, "converting", { filter: "converted", search: "" }).visibleItems,
+    [],
+  );
+  assert.deepEqual(
+    workflow.projectQueueView(fixtureSnapshot, "converted", { filter: "failed", search: "" }).visibleItems,
+    [],
+  );
+  assert.deepEqual(
+    workflow.projectQueueView(fixtureSnapshot, "converting", { filter: "all", search: "  BLUE  " }).visibleItems.map((item) => item.id),
+    ["queue-blue-hour"],
+  );
+  assert.deepEqual(
+    workflow.projectQueueView(fixtureSnapshot, "converted", { filter: "all", search: "MIRA" }).visibleItems.map((item) => item.id),
+    ["queue-lantern"],
+  );
+});
+
+test("fixture queue projections summarize complete views, handle empty results, and do not mutate input", () => {
+  const before = structuredClone(fixtureSnapshot);
+  const converting = workflow.projectQueueView(fixtureSnapshot, "converting", { filter: "failed", search: "" });
+  const converted = workflow.projectQueueView(fixtureSnapshot, "converted", { filter: "all", search: "missing" });
+
+  assert.deepEqual(converting.summary, {
+    total: 2,
+    waiting: 0,
+    analyzing: 0,
+    converting: 1,
+    failed: 1,
+    converted: 0,
+  });
+  assert.deepEqual(converted.summary, {
+    total: 1,
+    waiting: 0,
+    analyzing: 0,
+    converting: 0,
+    failed: 0,
+    converted: 1,
+  });
+  assert.deepEqual(converted.visibleItems, []);
+  assert.deepEqual(fixtureSnapshot, before);
+});
+
 test("reference filter evidence preserves the unresolved option set", async () => {
   const manifest = JSON.parse(await readFile("evidence/evidence-manifest.json", "utf8"));
   const filterEvidence = manifest.evidence.find((entry) => entry.id === "EV-FILTER-002");
@@ -203,6 +263,11 @@ test("renderer keeps local-only CSP and the three bounded views", async () => {
   assert.match(renderer, /navButton\("browser"/);
   assert.match(renderer, /navButton\("converting"/);
   assert.match(renderer, /navButton\("converted"/);
+  assert.match(renderer, /projectQueueView\(snapshot, activeView, query\)/);
+  assert.match(renderer, /renderQueue\(projection\)/);
+  assert.doesNotMatch(renderer, /filterQueueItems\(snapshot\.queueItems/);
+  assert.match(renderer, /query = \{ \.\.\.query, filter: "all" \}/);
+  assert.ok(renderer.includes('${summary.total} fixture job${summary.total === 1 ? "" : "s"}'));
 });
 
 test("fixture accessibility contract is semantic without claiming runtime traversal", async () => {
