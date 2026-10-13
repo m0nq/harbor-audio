@@ -1,0 +1,26 @@
+{
+  "name": "harbor-audio-fixture-scaffold",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fixture-backed workflow parity scaffold with a local-only Electron shell.",
+  "main": "dist/main.js",
+  "packageManager": "pnpm@12.12.1",
+  "engines": {
+    "node": ">=24.0.0 <27"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "typecheck": "tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "build:main": "tsc -p tsconfig.main.json",
+    "build:renderer": "tsc -p tsconfig.renderer.json",
+    "build": "pnpm run clean && pnpm run build:main && pnpm run build:renderer && node scripts/copy-assets.mjs",
+    "test": "pnpm run build && node --test test/*.test.mjs",
+    "start": "electron .",
+    "dev": "pnpm run build && electron ."
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "electron": "44.7.0",
+    "typescript": "7.0.2"
+  }
+}

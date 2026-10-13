@@ -1,0 +1,230 @@
+{
+  "captureBaseline": "fixture-baseline-2026-10-12",
+  "scope": "sanitized fixture-backed workflow parity scaffold",
+  "referenceBaseline": {
+    "appVersion": "4.1.1",
+    "platform": "macOS arm64",
+    "capturedAt": "2026-10-12",
+    "artifactStatus": "conversation-captured; source artifacts are not materialized in this repository"
+  },
+  "evidence": [
+    {
+      "id": "EV-UI-001",
+      "source": "reference-ui",
+      "fact": "The captured reference exposed a browser-like source surface and separate queue/history views.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Exact source selection-to-queue gesture is not established."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "accessibility tree and screenshots; source artifacts are not materialized"
+      }
+    },
+    {
+      "id": "EV-WORKFLOW-001",
+      "source": "reference-ui",
+      "fact": "Failed rows were visible, but retry and cancellation affordances were not safely confirmed.",
+      "confidence": "medium",
+      "unresolvedBehavior": ["Retry and cancellation semantics remain unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "converting and converted view accessibility observations"
+      }
+    },
+    {
+      "id": "EV-OUTPUT-001",
+      "source": "reference-static",
+      "fact": "Output and optional lyrics concepts were present in static evidence, but exact path and representation were not confirmed.",
+      "confidence": "medium",
+      "unresolvedBehavior": ["Filename expansion, output path, and lyrics representation require a controlled local test."],
+      "provenance": {
+        "kind": "conversation-captured-reference-static",
+        "artifact": "installed-bundle metadata and static settings inspection"
+      }
+    },
+    {
+      "id": "EV-UI-002",
+      "source": "reference-ui",
+      "fact": "The captured reference exposed browser, converting, and converted/history navigation areas.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Exact tab semantics and keyboard navigation were not captured."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "top-level navigation accessibility observations"
+      }
+    },
+    {
+      "id": "EV-FILTER-001",
+      "source": "reference-ui",
+      "fact": "The captured queue views visibly included an All filter and a Search field.",
+      "confidence": "high",
+      "unresolvedBehavior": ["The complete live filter option set was not safely opened."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "converting and converted view screenshots/accessibility observations"
+      }
+    },
+    {
+      "id": "EV-FILTER-002",
+      "source": "reference-ui",
+      "fact": "On the converting view, a read-only closed-state accessibility and screenshot observation exposed a combo box set to All and a Search field; a non-activating Tab focus attempt did not expose additional filter labels.",
+      "confidence": "high",
+      "unresolvedBehavior": ["The complete live filter option set remains unknown because opening or selecting the filter menu was not authorized."],
+      "provenance": {
+        "kind": "bounded-read-only-reference-ui",
+        "artifact": "two observations of the converting view; filter activation and queue mutation were not performed"
+      }
+    },
+    {
+      "id": "EV-CONVERSION-001",
+      "source": "reference-ui",
+      "fact": "Failed conversion rows and a separate converted/history view were visible in the captured reference.",
+      "confidence": "high",
+      "unresolvedBehavior": ["The complete state transition sequence was not observed."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "converting and converted view observations"
+      }
+    },
+    {
+      "id": "EV-DRM-001",
+      "source": "reference-static",
+      "fact": "No local-file import or DRM-free conversion behavior was safely observed; native media libraries do not establish that capability.",
+      "confidence": "low",
+      "unresolvedBehavior": ["Local input contract, protected-media boundary, and conversion guarantees are unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-static",
+        "artifact": "installed-bundle inspection combined with read-only UI inspection"
+      }
+    },
+    {
+      "id": "EV-REMOTE-001",
+      "source": "reference-static",
+      "fact": "The installed bundle contained multiple remote-source preload surfaces, but no live provider interaction was performed.",
+      "confidence": "medium",
+      "unresolvedBehavior": ["Provider contracts, network behavior, and authorization boundaries are unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-static",
+        "artifact": "preload directory and static bundle inspection"
+      }
+    },
+    {
+      "id": "EV-AUTH-001",
+      "source": "reference-ui",
+      "fact": "An account/session surface was visible in the embedded source browser, but its authentication mechanism was not inspected.",
+      "confidence": "medium",
+      "unresolvedBehavior": ["Credential storage, session scope, and login requirements are unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "embedded source browser accessibility observations"
+      }
+    },
+    {
+      "id": "EV-A11Y-001",
+      "source": "reference-ui",
+      "fact": "No dedicated accessibility parity capture was completed for the reference UI.",
+      "confidence": "low",
+      "unresolvedBehavior": ["Reference roles, focus order, keyboard behavior, and screen-reader output are unknown."],
+      "provenance": {
+        "kind": "conversation-capture-boundary",
+        "artifact": "inspection record showing no dedicated accessibility pass"
+      }
+    },
+    {
+      "id": "EV-A11Y-002",
+      "source": "reference-ui",
+      "fact": "The current reference accessibility snapshot exposes named roles for tabs, tables/rows/cells, buttons, checkboxes, switches, a slider, a text field, and a combo box.",
+      "confidence": "medium",
+      "unresolvedBehavior": ["Keyboard focus order, traversal behavior, hidden or hover-only controls, and screen-reader output remain unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-ui",
+        "artifact": "read-only accessibility snapshot of the browser and converter surfaces"
+      }
+    },
+    {
+      "id": "EV-A11Y-003",
+      "source": "fixture",
+      "fact": "The fixture renderer statically declares a polite root live region, labeled workspace navigation with native buttons, a native filter select, a native search input, a semantic queue table, and text-only status and unknown-state notes.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Runtime focus order, keyboard traversal, screen-reader output, and live-region announcement behavior were not exercised because direct Electron launch exited SIGABRT and browser inspection of the local file URL was blocked."],
+      "provenance": {
+        "kind": "fixture-static-accessibility-audit",
+        "artifact": "src/renderer/index.html and src/renderer/renderer.ts; no runtime or reference-app actions"
+      }
+    },
+    {
+      "id": "EV-PACKAGE-001",
+      "source": "reference-static",
+      "fact": "The inspected reference artifact was an Electron macOS arm64 application with a macOS 11 minimum and stapled notarization; distribution workflow was not established.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Installer, updater, signing workflow, and non-macOS distribution are unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-static",
+        "artifact": "bundle metadata, executable architecture, and code-signing inspection"
+      }
+    },
+    {
+      "id": "EV-PLATFORM-001",
+      "source": "reference-static",
+      "fact": "Only macOS arm64 platform evidence is available for the reference artifact.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Intel macOS, Windows, Linux, and store distribution support are unknown."],
+      "provenance": {
+        "kind": "conversation-captured-reference-static",
+        "artifact": "reference executable architecture and minimum OS metadata"
+      }
+    },
+    {
+      "id": "EV-RUNTIME-001",
+      "source": "runtime-smoke",
+      "fact": "The fixture Electron app launched through the macOS app layer and rendered the Browser, Converting, and Converted views in the local-only shell.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Direct terminal Electron invocation exited SIGABRT in this environment."],
+      "provenance": {
+        "kind": "desktop-runtime-smoke",
+        "artifact": "macOS app-layer launch with accessibility and screenshot capture; no provider or credential actions"
+      }
+    },
+    {
+      "id": "EV-RUNTIME-002",
+      "source": "runtime-smoke",
+      "fact": "On macOS 26.7.1 arm64 with Node v26.10.0 arm64 and Electron 44.7.0 arm64, both `pnpm exec electron --version` and one controlled `pnpm start` attempt exited with SIGABRT; sanitized crash metadata places the main-thread abort in AppKit/LaunchServices during NSApplication initialization before fixture renderer startup.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Electron 44's documented macOS floor is satisfied by macOS 26.7.1; official Electron issue #52815 matches the AppKit/LaunchServices signature on macOS 26 but does not establish this machine's launchservicesd state or whether Electron 44 is affected; no workaround was tested."],
+      "provenance": {
+        "kind": "sanitized-local-runtime-diagnostic",
+        "artifact": "bare pnpm command results, Electron arm64 bundle metadata, ad-hoc signature metadata, sanitized Electron IPS crash reports, and official cross-checks: https://www.electronjs.org/blog/electron-44-0 and https://github.com/electron/electron/issues/52815"
+      }
+    },
+    {
+      "id": "EV-FIXTURE-001",
+      "source": "fixture",
+      "fact": "The scaffold fixture confirms local browser, converting, and converted states with sample queue data.",
+      "confidence": "high",
+      "unresolvedBehavior": [],
+      "provenance": {
+        "kind": "repository-fixture",
+        "artifact": "src/fixtures/workflow-fixtures.ts"
+      }
+    },
+    {
+      "id": "EV-POLICY-001",
+      "source": "implementation-policy",
+      "fact": "The scaffold boundary disables network access, credentials, remote providers, DRM handling, real conversion, and destructive actions.",
+      "confidence": "high",
+      "unresolvedBehavior": ["Direct terminal Electron invocation remains environment-limited by SIGABRT; macOS app-layer runtime smoke is separately verified."],
+      "provenance": {
+        "kind": "approved-scope-policy",
+        "artifact": "fixture-only scaffold objective and repository implementation boundary"
+      }
+    }
+  ],
+  "safetyBoundary": {
+    "network": "No network requests were initiated by the agent; renderer network is denied by CSP and no network capability is exposed",
+    "runtimeSmoke": "Browser, Converting, and Converted views were verified through macOS app-layer launch; direct terminal launch remains environment-limited",
+    "credentials": "never requested",
+    "remoteProviders": "disabled",
+    "drmAndProtectedMedia": "not implemented",
+    "realConversion": "not implemented",
+    "destructiveActions": "not implemented"
+  }
+}

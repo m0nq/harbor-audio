@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.DS_Store
+
+# Local environment and debug artifacts
+.env
+.env.*
+!.env.example
+*.log
+*.ips
+*.crash
+*.dmp
+crash-reports/
+
+# Disposable local fixture output
+outputs/
+work/

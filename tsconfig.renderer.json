@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "outDir": "dist/renderer",
+    "rootDir": "src",
+    "lib": ["ES2022", "DOM"],
+    "types": []
+  },
+  "include": [
+    "src/renderer/**/*.ts",
+    "src/domain/**/*.ts"
+  ]
+}
