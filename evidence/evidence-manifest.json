@@ -75,6 +75,35 @@
       }
     },
     {
+      "id": "EV-FILTER-003",
+      "source": "reference-ui",
+      "referenceApplication": "AudFree Apple Music Converter",
+      "view": "Converting",
+      "observationDate": "2026-10-14",
+      "filterLocation": "upper-left, directly beneath top navigation",
+      "selectedValue": "All",
+      "visibleOptions": ["All", "Artist", "Album"],
+      "observedDisplayOrder": ["All", "Artist", "Album"],
+      "queueCondition": "empty; Files: 0",
+      "selectionPerformed": false,
+      "dataMutationOccurred": false,
+      "fact": "On October 14, 2026, a human-captured screenshot of the original AudFree Apple Music Converter's Converting view showed the expanded filter dropdown in the upper-left, directly beneath top navigation. The selected value was All, and the complete visible option list was All, Artist, Album in that order. The queue was empty and displayed Files: 0. This is high-confidence evidence of the visible filter vocabulary for this capture only; the labels are not interpreted as conversion statuses.",
+      "confidence": "high",
+      "unresolvedBehavior": [
+        "What Artist does is unknown.",
+        "What Album does is unknown.",
+        "Whether the control filters or groups is unknown.",
+        "Behavior with populated queues is unknown.",
+        "Whether other views expose identical options is unknown.",
+        "Whether selection persists across navigation is unknown."
+      ],
+      "provenance": {
+        "kind": "human-reviewed-reference-screenshot",
+        "artifact": "Screenshot captured by the human operator and reviewed by the human operator and ChatGPT control center; the local screenshot file is not available to this Codex session, so no local path or artifact hash is claimed.",
+        "reviewedBy": "human operator and ChatGPT control center"
+      }
+    },
+    {
       "id": "EV-CONVERSION-001",
       "source": "reference-ui",
       "fact": "Failed conversion rows and a separate converted/history view were visible in the captured reference.",

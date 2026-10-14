@@ -11,7 +11,9 @@ This plan is limited to read-only observation of the installed reference app. It
 - Prohibited action: Do not select a filter option, type into Search, or activate any queue control.
 - Expected evidence artifact: Sanitized accessibility snapshot or screenshot listing the complete live filter labels, with no account/session data.
 - Stop condition: The menu does not expose its options without activation, or two observation attempts leave the state unclear.
-- Current status: Partial; two safe attempts exposed only the closed `All` combo and Search field, so the complete option set remains unknown (`EV-FILTER-001`, `EV-FILTER-002`).
+- Current status: Partial but vocabulary-confirmed for one state; the October 14, 2026 human-reviewed screenshot showed the expanded Converting-view filter with `All`, `Artist`, and `Album` in that order while the selected value remained `All` and the queue displayed `Files: 0` (`EV-FILTER-003`). No option was selected and no conversion or other application-data mutation occurred. The earlier closed-state observations remain historical and unchanged (`EV-FILTER-001`, `EV-FILTER-002`).
+- Interpretation boundary: Record `All`, `Artist`, and `Album` as visible filter vocabulary only; do not interpret them as conversion statuses or infer filtering/grouping behavior.
+- Remaining unknowns: What `Artist` and `Album` do, filtering versus grouping semantics, behavior with populated queues, whether other views expose identical options, and whether selection persists across navigation.
 
 ## Retry and cancellation affordances
 
