@@ -51,6 +51,26 @@ export interface QueueItem {
   status: ConversionStatus;
 }
 
+/**
+ * Fixture-local metadata for the bounded Converted-view reference projection.
+ * These fields are explicit test data; they are not parsed from display text.
+ */
+export interface ConvertedFilterMetadata {
+  readonly artistCredits?: readonly string[];
+  readonly album?: string;
+}
+
+export interface ConvertedFilterItem extends QueueItem {
+  readonly referenceMetadata?: ConvertedFilterMetadata;
+}
+
+export type ConvertedFilterSelection =
+  | { dimension: "all"; value: "all" }
+  | { dimension: "artist"; value: "all-artists" }
+  | { dimension: "artist"; value: { kind: "specific"; key: string } }
+  | { dimension: "album"; value: "all-albums" }
+  | { dimension: "album"; value: { kind: "specific"; key: string } };
+
 export type ConversionStatus = "waiting" | "analyzing" | "converting" | "failed" | "converted";
 
 export interface ConversionJob {
