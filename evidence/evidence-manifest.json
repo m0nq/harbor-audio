@@ -104,6 +104,125 @@
       }
     },
     {
+      "id": "EV-FILTER-004",
+      "source": "reference-ui",
+      "referenceApplication": "AudFree Apple Music Converter",
+      "view": "Converted",
+      "observationDate": "2026-10-14",
+      "searchText": "",
+      "primaryOptions": ["All", "Artist", "Album"],
+      "secondarySelectors": {
+        "Artist": "All Artists",
+        "Album": "All Albums"
+      },
+      "inclusiveBaseline": {
+        "visibleRowCount": 14,
+        "sameMembershipAndOrderAcross": [
+          "All",
+          "Artist → All Artists",
+          "Album → All Albums"
+        ],
+        "groupingHeadersObserved": false,
+        "columnChangesObserved": false
+      },
+      "specificArtistObservation": {
+        "selectedValue": "Yudi Watanabe",
+        "visibleRowCount": 9,
+        "allDisplayedArtistValuesContainSelectedValue": true,
+        "collaborationEntriesIncluded": true,
+        "groupingHeadersObserved": false,
+        "columnChangesObserved": false
+      },
+      "fact": "In the original AudFree Apple Music Converter's Converted view, the primary filter vocabulary was All, Artist, and Album. The inclusive secondary values were All Artists and All Albums. With Search empty, All, Artist → All Artists, and Album → All Albums each showed the same 14 visible rows in the same order. Selecting Artist → Yudi Watanabe reduced the view to nine rows; every displayed Artist value contained Yudi Watanabe, including collaboration entries. No grouping headers or column changes were observed. This is bounded evidence for the tested states and does not establish the exact matching algorithm. The original Codex live UI/accessibility inspection reported restoring the interface to Converted with primary filter All, Search text `last cycle`, one visible Last Cycle entry, and the dropdown closed; no entries were added, removed, played, converted, or modified. No independent restoration screenshot was archived.",
+      "confidence": "high",
+      "unresolvedBehavior": [
+        "The exact Artist matching algorithm, including tokenization or normalization, is unknown.",
+        "Artist selection behavior outside the tested Yudi Watanabe value is unknown.",
+        "Whether the primary dimensions always filter rather than group or sort is unknown outside the tested states.",
+        "Search composition with a specific secondary value is unknown.",
+        "Whether these controls expose identical behavior in other reference views is unknown.",
+        "Whether selections persist across navigation is unknown."
+      ],
+      "provenance": {
+        "kind": "direct-live-reference-ui-accessibility-inspection",
+        "artifact": "Direct Codex live UI and accessibility observations of the Converted view; no screenshot artifact was saved for these experiments, so no screenshot path or artifact hash is claimed."
+      }
+    },
+    {
+      "id": "EV-FILTER-005",
+      "source": "reference-ui",
+      "referenceApplication": "AudFree Apple Music Converter",
+      "view": "Converted",
+      "observationDate": "2026-10-14",
+      "searchText": "TheHouseArchives",
+      "secondarySelections": {
+        "All": "inclusive",
+        "Artist": "All Artists",
+        "Album": "All Albums"
+      },
+      "resultRows": ["Touch", "Temple"],
+      "resultRowCount": 2,
+      "sameResultsAcrossPrimaryOptions": true,
+      "queryRemainedPopulatedAcrossPrimaryChanges": true,
+      "matchingArtistMetadata": "TheHouseArchives",
+      "fact": "In the original AudFree Apple Music Converter's Converted view, the Search query TheHouseArchives returned the same two visible rows, Touch and Temple, under All, Artist → All Artists, and Album → All Albums. Both rows displayed TheHouseArchives as Artist metadata, and the Search query remained populated while the primary selection changed. This establishes the result for the tested inclusive states only; it does not establish complete Search scope or composition semantics.",
+      "confidence": "high",
+      "unresolvedBehavior": [
+        "Complete Search scope across title, artist, album, and other metadata is unknown.",
+        "Search normalization, tokenization, and matching rules are unknown.",
+        "Search behavior with an active specific Artist or Album selection is unknown.",
+        "Independence of these results across every possible filter state is unknown.",
+        "Whether Search persists across navigation beyond the tested primary changes is unknown."
+      ],
+      "provenance": {
+        "kind": "direct-live-reference-ui-accessibility-inspection",
+        "artifact": "Direct Codex live UI and accessibility observations of the Converted view; no screenshot artifact was saved for these experiments, so no screenshot path or artifact hash is claimed."
+      }
+    },
+    {
+      "id": "EV-FILTER-006",
+      "source": "reference-ui",
+      "referenceApplication": "AudFree Apple Music Converter",
+      "view": "Converted",
+      "observationDate": "2026-10-14",
+      "searchText": "",
+      "primaryFilter": "Album",
+      "secondaryFilter": "Low Tide - EP",
+      "inclusiveBaselineVisibleRowCount": 14,
+      "resultRowCount": 2,
+      "resultRows": [
+        {
+          "title": "Change (Andrés Moris 'Embrace' Re-Vision)",
+          "artist": "Tom Banner, Andrés Moris",
+          "album": "Low Tide - EP"
+        },
+        {
+          "title": "Is It Love? (RIGOONI Remix)",
+          "artist": "Tom Banner, RIGOONI",
+          "album": "Low Tide - EP"
+        }
+      ],
+      "allDisplayedAlbumValuesMatchSelectedValue": true,
+      "expectedMatchingEntriesRemain": true,
+      "unrelatedEntriesDisappeared": true,
+      "relativeOrderPreserved": true,
+      "selectedValueRemainedVisible": true,
+      "groupingHeadersObserved": false,
+      "columnChangesObserved": false,
+      "fact": "In the original AudFree Apple Music Converter's Converted view with Search empty, selecting Album → Low Tide - EP reduced the 14-row inclusive baseline to exactly two visible rows: Change (Andrés Moris 'Embrace' Re-Vision) by Tom Banner, Andrés Moris and Is It Love? (RIGOONI Remix) by Tom Banner, RIGOONI. Both rows displayed Low Tide - EP as their Album value, the expected matching entries remained, unrelated entries disappeared, the selected Album value remained visible, and the two rows retained their prior relative order. No grouping headers or column changes were observed. This demonstrates album-membership filtering for the tested album, not the exact internal matching or normalization behavior. The original Codex live UI/accessibility inspection reported restoring the interface to Converted with primary filter All, Search text `last cycle`, one visible Last Cycle entry, no secondary selector or dropdown open, and no entries added, removed, played, converted, or modified. No independent restoration screenshot was archived.",
+      "confidence": "high",
+      "unresolvedBehavior": [
+        "The exact Album matching and normalization algorithm is unknown.",
+        "Album behavior for values with other metadata or edge cases is unknown.",
+        "Search composition with this or another specific Album selection is unknown.",
+        "Whether album selection persists across navigation is unknown."
+      ],
+      "provenance": {
+        "kind": "direct-live-reference-ui-accessibility-inspection",
+        "artifact": "Direct Codex live UI and accessibility observations of the Converted view; no screenshot artifact was saved for these experiments, so no screenshot path or artifact hash is claimed."
+      }
+    },
+    {
       "id": "EV-CONVERSION-001",
       "source": "reference-ui",
       "fact": "Failed conversion rows and a separate converted/history view were visible in the captured reference.",
