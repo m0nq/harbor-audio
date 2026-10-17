@@ -223,6 +223,106 @@
       }
     },
     {
+      "id": "EV-FILTER-007",
+      "source": "reference-ui",
+      "referenceApplication": "AudFree Apple Music Converter",
+      "view": "Converted",
+      "primaryFilter": "Album",
+      "secondaryFilter": "Low Tide - EP",
+      "resumptionState": {
+        "view": "Converted",
+        "primaryFilter": "Album",
+        "secondaryFilter": "All Albums",
+        "searchText": "",
+        "visibleRowCount": 14
+      },
+      "specificAlbumBaseline": {
+        "searchText": "",
+        "visibleRowCount": 2,
+        "resultRows": [
+          {
+            "title": "Change (Andrés Moris 'Embrace' Re-Vision)",
+            "artist": "Tom Banner, Andrés Moris",
+            "album": "Low Tide - EP"
+          },
+          {
+            "title": "Is It Love? (RIGOONI Remix)",
+            "artist": "Tom Banner, RIGOONI",
+            "album": "Low Tide - EP"
+          }
+        ]
+      },
+      "unfilteredSearchBaselines": {
+        "Change": {
+          "visibleRowCount": 3,
+          "matchingAlbums": "multiple Albums"
+        },
+        "Last Cycle": {
+          "visibleRowCount": 1,
+          "resultRow": {
+            "title": "Last Cycle",
+            "album": "Last Cycle - Single"
+          }
+        }
+      },
+      "positiveSearchObservation": {
+        "searchText": "Change",
+        "visibleRowCount": 1,
+        "resultRows": [
+          {
+            "title": "Change (Andrés Moris 'Embrace' Re-Vision)",
+            "album": "Low Tide - EP"
+          }
+        ],
+        "selectedAlbumRemainedVisible": true
+      },
+      "negativeSearchObservation": {
+        "searchText": "Last Cycle",
+        "visibleRowCount": 0,
+        "emptyResultPresentation": "It's empty here.",
+        "selectedAlbumRemainedVisible": true
+      },
+      "clearedSearchObservation": {
+        "searchText": "",
+        "visibleRowCount": 2,
+        "originalSpecificAlbumRowsReturned": true,
+        "selectedAlbumRemainedVisible": true
+      },
+      "searchDidNotResetOrOverrideAlbumSelection": true,
+      "dataMutationOccurred": false,
+      "fact": "Before the interrupted experiment, the original interface state was Browser with Search empty and no dropdown or modal open. The resumed investigation reported restoring and verifying that same state. In the original AudFree Apple Music Converter's Converted view, the resumed live UI state was Album → All Albums with Search empty and 14 visible rows. Selecting Album → Low Tide - EP produced two visible rows: Change (Andrés Moris 'Embrace' Re-Vision) and Is It Love? (RIGOONI Remix). With Low Tide - EP still selected, Search Change produced only the matching Low Tide row, while the unfiltered Search baseline had three Change-matching rows from multiple Albums. Search Last Cycle produced zero rows; the interface displayed It's empty here. The unfiltered baseline had one Last Cycle row from Last Cycle - Single. Clearing Search restored the original two Low Tide - EP rows. The selected Album remained visible throughout, so the tested observations support specific Album membership AND Search matching for this Converted-view state. This is bounded evidence and does not establish general Search composition or matching semantics.",
+      "confidence": "high",
+      "unresolvedBehavior": [
+        "Search behavior with a specific Artist selection is unknown.",
+        "General Search matching scope is unknown.",
+        "Search normalization, tokenization, and matching rules are unknown.",
+        "The exact Artist matching algorithm is unknown.",
+        "The exact Album matching algorithm is unknown.",
+        "General collaborator matching semantics are unknown.",
+        "Cross-view selection persistence is unknown.",
+        "Application-relaunch persistence is unknown.",
+        "Universal empty-result presentation is unknown; the observed message is bounded to this state.",
+        "Universal sorting behavior is unknown.",
+        "Full reference parity is unknown."
+      ],
+      "restoration": {
+        "startedFromInterruptedSession": true,
+        "targetState": {
+          "view": "Browser",
+          "searchText": "",
+          "dropdownOrModalOpen": false
+        },
+        "reportedVerified": true,
+        "entriesAddedRemovedPlayedConvertedOrModified": false,
+        "credentialsProvidersSettingsSubscriptionsAndDrmAccessed": false,
+        "independentRestorationScreenshotArchived": false
+      },
+      "provenance": {
+        "kind": "direct-live-reference-ui-accessibility-inspection",
+        "artifact": "Direct Codex live UI and accessibility observations during a resumed, bounded Converted-view experiment; no screenshot artifact was retained, so no screenshot path or artifact hash is claimed."
+      }
+    },
+    {
       "id": "EV-CONVERSION-001",
       "source": "reference-ui",
       "fact": "Failed conversion rows and a separate converted/history view were visible in the captured reference.",
