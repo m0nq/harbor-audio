@@ -323,6 +323,92 @@
       }
     },
     {
+      "id": "EV-FILTER-008",
+      "source": "reference-ui",
+      "referenceApplication": "AudFree Apple Music Converter",
+      "view": "Converted",
+      "observationDate": "2026-10-18",
+      "unfilteredSearchBaselines": {
+        "Last Cycle": {
+          "primaryFilter": "All",
+          "visibleRowCount": 1,
+          "resultRows": [
+            {
+              "title": "Last Cycle",
+              "artist": "Yudi Watanabe"
+            }
+          ]
+        },
+        "Touch": {
+          "primaryFilter": "All",
+          "visibleRowCount": 5,
+          "noDisplayedArtistColumnValueContainsYudiWatanabe": true
+        }
+      },
+      "specificArtistBaseline": {
+        "primaryFilter": "Artist",
+        "secondaryFilter": "Yudi Watanabe",
+        "searchText": "",
+        "visibleRowCount": 9,
+        "collaborationEntriesIncluded": true
+      },
+      "positiveSearchObservation": {
+        "searchText": "Last Cycle",
+        "visibleRowCount": 1,
+        "resultRows": [
+          {
+            "title": "Last Cycle",
+            "artist": "Yudi Watanabe"
+          }
+        ],
+        "artistSelectionRemainedActive": true
+      },
+      "negativeSearchObservation": {
+        "searchText": "Touch",
+        "visibleRowCount": 0,
+        "emptyResultPresentation": "It's empty here.",
+        "artistSelectionRemainedActive": true
+      },
+      "clearedSearchObservation": {
+        "searchText": "",
+        "visibleRowCount": 9,
+        "originalArtistFilteredMembershipReturned": true,
+        "observedOrderingPreserved": true,
+        "artistSelectionRemainedActive": true
+      },
+      "testedArtistSearchIntersectionSupported": true,
+      "fact": "In the original AudFree Apple Music Converter's Converted view, under primary All, Search Last Cycle returned one visible entry, Last Cycle — Yudi Watanabe. Search Touch returned five visible entries, none displaying Yudi Watanabe in the Artist column. With Artist → Yudi Watanabe selected and Search empty, nine entries were visible, including collaborations. With that specific Artist selection active, Search Last Cycle returned the single Last Cycle — Yudi Watanabe entry, and Search Touch returned no entries while the interface displayed the message \"It's empty here.\" The Artist selection remained active for both queries. Clearing Search restored the same nine Artist-filtered entries in their observed order, with Yudi Watanabe still selected. These observations support specific Artist membership AND Search matching for this tested Converted-view state and these queries only; they do not establish general Search or Artist matching semantics.",
+      "confidence": "high",
+      "unresolvedBehavior": [
+        "General Search matching scope is unknown.",
+        "Search normalization, tokenization, and matching rules are unknown.",
+        "Search behavior with other specific Artist selections and queries is unknown.",
+        "The exact Artist matching algorithm is unknown.",
+        "General collaborator matching semantics outside the tested Yudi Watanabe entries are unknown.",
+        "The exact Album matching algorithm is unknown.",
+        "Cross-view selection persistence is unknown.",
+        "Application-relaunch persistence is unknown.",
+        "Universal empty-result presentation is unknown; the observed message is bounded to the tested Artist and Search state.",
+        "Universal sorting behavior is unknown.",
+        "Full reference parity is unknown."
+      ],
+      "restoration": {
+        "convertedSearchWasEmptyBeforeBrowserNavigation": true,
+        "finalView": "Browser",
+        "browserContentVisible": true,
+        "dropdownOrModalOpen": false,
+        "browserViewRestorationConfirmed": true,
+        "exactPriorBrowserPageRestorationConfirmed": false,
+        "earlierAutomationBrowserPage": "Apple Music Home",
+        "finalScreenshotBrowserContent": "playlist"
+      },
+      "provenance": {
+        "kind": "human-operated-reference-ui-screenshots-reviewed-in-conversation",
+        "artifact": "Seven screenshots captured by the human operator on 2026-10-18 and supplied in the ChatGPT control-center conversation; visually reviewed there. They are not known to be archived in this repository, and no filename, repository path, or artifact hash is claimed. The Search and filter interactions were human-performed; earlier autonomous Codex attempts were blocked by desktop-control errors.",
+        "reviewedBy": "ChatGPT control center"
+      }
+    },
+    {
       "id": "EV-CONVERSION-001",
       "source": "reference-ui",
       "fact": "Failed conversion rows and a separate converted/history view were visible in the captured reference.",
