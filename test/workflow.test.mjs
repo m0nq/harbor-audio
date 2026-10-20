@@ -206,6 +206,7 @@ test("fixture-only source contains no network primitives or remote URLs", async 
     "src/domain/contracts.ts",
     "src/domain/workflow.ts",
     "src/fixtures/workflow-fixtures.ts",
+    "src/fixtures/converted-filter-fixtures.ts",
     "src/renderer/renderer.ts",
   ];
   const source = await Promise.all(files.map((file) => readFile(file, "utf8")));
@@ -263,8 +264,10 @@ test("renderer keeps local-only CSP and the three bounded views", async () => {
   assert.match(renderer, /navButton\("browser"/);
   assert.match(renderer, /navButton\("converting"/);
   assert.match(renderer, /navButton\("converted"/);
-  assert.match(renderer, /projectQueueView\(snapshot, activeView, query\)/);
-  assert.match(renderer, /renderQueue\(projection\)/);
+  assert.match(renderer, /projectQueueView\(snapshot,\s*"converting",\s*query\)/);
+  assert.match(renderer, /projectConvertedFilter\(convertedViewDemoItems,\s*convertedSelection\)/);
+  assert.match(renderer, /filterQueueItems\(membership,\s*\{ filter: "all", search: query\.search \}\)/);
+  assert.doesNotMatch(renderer, /projectQueueView\(snapshot,\s*activeView/);
   assert.doesNotMatch(renderer, /filterQueueItems\(snapshot\.queueItems/);
   assert.match(renderer, /query = \{ \.\.\.query, filter: "all" \}/);
   assert.ok(renderer.includes('${summary.total} fixture job${summary.total === 1 ? "" : "s"}'));
@@ -274,11 +277,16 @@ test("fixture accessibility contract is semantic without claiming runtime traver
   const html = await readFile("src/renderer/index.html", "utf8");
   const renderer = await readFile("src/renderer/renderer.ts", "utf8");
 
-  assert.match(html, /<div id="app" class="app-shell" aria-live="polite"><\/div>/);
+  assert.match(html, /<div id="app" class="app-shell"><\/div>/);
+  assert.doesNotMatch(html, /id="app"[^>]*aria-live/);
   assert.match(renderer, /<nav class="nav" aria-label="Workspace views">/);
   assert.match(renderer, /<select class="filter-select" id="filter" aria-label="Filter items">/);
-  assert.match(renderer, /<input class="search" id="search" type="search" placeholder="Search fixture library"/);
-  assert.match(renderer, /<table class="queue-table"><thead><tr><th>Title<\/th>/);
+  assert.match(renderer, /id="converted-dimension"/);
+  assert.match(renderer, /id="converted-value"/);
+  assert.match(renderer, /<input class="search" id="search" type="search"/);
+  assert.match(renderer, /role="status"/);
+  assert.match(renderer, /<table class="queue-table"><thead><tr><th scope="col">Title<\/th>/);
+  assert.match(renderer, /<table class="queue-table converted-table"><caption class="visually-hidden">Converted synthetic demonstration tracks<\/caption>/);
   assert.match(renderer, /<span class="status \$\{item\.status\}">/);
   assert.match(renderer, /No action controls are exposed in fixture mode/);
 });

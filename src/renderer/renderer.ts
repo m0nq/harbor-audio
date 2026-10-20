@@ -1,5 +1,22 @@
-import type { FixtureQueueProjection, FixtureView, QueueFilter, QueueQuery, WorkflowSnapshot } from "../domain/contracts.js";
-import { filterLabels, findJob, projectQueueView, toQueueRowViewModel } from "../domain/workflow.js";
+import type {
+  ConvertedFilterItem,
+  ConvertedFilterSelection,
+  FixtureQueueProjection,
+  FixtureView,
+  QueueFilter,
+  QueueItem,
+  QueueQuery,
+  WorkflowSnapshot,
+} from "../domain/contracts.js";
+import {
+  filterLabels,
+  filterQueueItems,
+  findJob,
+  projectQueueView,
+  toQueueRowViewModel,
+} from "../domain/workflow.js";
+import { projectConvertedFilter } from "../domain/converted-filter.js";
+import { convertedViewDemoItems } from "../fixtures/converted-filter-fixtures.js";
 
 declare global {
   interface Window {
@@ -9,9 +26,18 @@ declare global {
   }
 }
 
+interface ConvertedEmptyState {
+  kind: "empty-collection" | "empty-selection" | "no-search-results";
+  message: string;
+  showClearSearch: boolean;
+}
+
 let snapshot: WorkflowSnapshot | undefined;
 let activeView: FixtureView = "browser";
 let query: QueueQuery = { filter: "all", search: "" };
+let convertedSelection: ConvertedFilterSelection = { dimension: "all", value: "all" };
+
+const optionCollator = new Intl.Collator("en-US", { sensitivity: "base", numeric: false });
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (character) => ({
@@ -27,7 +53,11 @@ function renderShell(): void {
   const app = document.querySelector<HTMLDivElement>("#app");
   if (!app || !snapshot) return;
 
-  const projection = activeView === "browser" ? undefined : projectQueueView(snapshot, activeView, query);
+  const activeContent = activeView === "browser"
+    ? renderBrowser()
+    : activeView === "converted"
+      ? renderConvertedQueue()
+      : renderConvertingQueue(projectQueueView(snapshot, "converting", query));
 
   app.innerHTML = `
     <aside class="sidebar">
@@ -48,7 +78,7 @@ function renderShell(): void {
         <div><div class="eyebrow">Workflow parity lab</div><h1>${activeView === "browser" ? "Browse a local source" : activeView === "converting" ? "Conversion queue" : "Completed items"}</h1><p class="intro">A bounded desktop shell for inspecting known and unknown workflow states.</p></div>
         <div class="baseline">capture ${escapeHtml("fixture-baseline-2026-10-12")}</div>
       </div>
-      ${projection ? renderQueue(projection) : renderBrowser()}
+      ${activeContent}
     </main>
   `;
 
@@ -56,14 +86,14 @@ function renderShell(): void {
 }
 
 function navButton(view: typeof activeView, icon: string, label: string): string {
-  return `<button class="nav-button ${activeView === view ? "active" : ""}" data-view="${view}"><span class="nav-icon">${icon}</span>${label}</button>`;
+  return `<button class="nav-button ${activeView === view ? "active" : ""}" data-view="${view}" aria-current="${activeView === view ? "page" : "false"}"><span class="nav-icon" aria-hidden="true">${icon}</span>${label}</button>`;
 }
 
 function renderBrowser(): string {
   const items = snapshot?.sourceItems ?? [];
   return `
     <section class="browser-card" aria-label="Local browser fixture">
-      <div class="browser-toolbar"><div class="traffic"><span></span><span></span><span></span></div><div class="address">fixture://library/night-transit</div><span class="fixture-badge">offline</span></div>
+      <div class="browser-toolbar"><div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div><div class="address">fixture://library/night-transit</div><span class="fixture-badge">offline</span></div>
       <div class="browser-body"><div class="source-menu"><div class="selected">Library</div><div>Playlists</div><div>Collections</div><div>Recently added</div></div><div><div class="source-heading">Night Transit</div><div class="source-meta">A local playlist fixture · ${items.length} sample items</div><div class="source-list">${items.map((item) => `<div class="source-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.creator)} · ${escapeHtml(item.collection)}</span></div><span>${escapeHtml(item.duration)}</span></div>`).join("")}</div></div></div>
     </section>
     <div class="section-heading"><div><h2>Queue preview</h2><p>Selection and insertion behavior remain explicitly fixture-scoped.</p></div><span class="fixture-badge">no actions</span></div>
@@ -71,19 +101,155 @@ function renderBrowser(): string {
   `;
 }
 
-function renderQueue(projection: FixtureQueueProjection): string {
-  const { view, visibleItems: items, summary } = projection;
-  const isConverted = view === "converted";
-
+function renderConvertingQueue(projection: FixtureQueueProjection): string {
+  const { visibleItems: items, summary } = projection;
   return `
-    <div class="section-heading"><div><h2>${isConverted ? "Converted" : "Converting"}</h2><p>${summary.total} fixture job${summary.total === 1 ? "" : "s"} · ${summary.failed} failed · ${summary.converted} converted</p></div><span class="fixture-badge">local only</span></div>
-    <section class="queue-card" aria-label="${isConverted ? "Converted" : "Converting"} fixture list">
-      <div class="queue-toolbar"><select class="filter-select" id="filter" aria-label="Filter items">${Object.entries(filterLabels).map(([value, label]) => `<option value="${value}" ${query.filter === value ? "selected" : ""}>${label}</option>`).join("")}</select><input class="search" id="search" type="search" placeholder="Search fixture library" value="${escapeHtml(query.search)}" /><span class="toolbar-spacer"></span><span class="fixture-badge">fixture</span></div>
-      ${items.length === 0 ? `<div class="empty">No fixture rows match this view.</div>` : `<table class="queue-table"><thead><tr><th>Title</th><th>Creator</th><th>Collection</th><th>Duration</th><th>Status</th></tr></thead><tbody>${items.map((item) => { const row = toQueueRowViewModel(item, findJob(snapshot as WorkflowSnapshot, item.id)); return `<tr><td>${escapeHtml(row.title)}</td><td>${escapeHtml(row.creator)}</td><td>${escapeHtml(row.collection)}</td><td>${escapeHtml(row.duration)}</td><td><span class="status ${item.status}">${escapeHtml(row.statusLabel)}</span></td></tr>`; }).join("")}</tbody></table>`}
+    <div class="section-heading"><div><h2>Converting</h2><p>${summary.total} fixture job${summary.total === 1 ? "" : "s"} · ${summary.failed} failed · ${summary.converted} converted</p></div><span class="fixture-badge">local only</span></div>
+    <section class="queue-card" aria-label="Converting fixture list">
+      <div class="queue-toolbar">
+        <label class="visually-hidden" for="filter">Filter items</label><select class="filter-select" id="filter" aria-label="Filter items">${Object.entries(filterLabels).map(([value, label]) => `<option value="${value}" ${query.filter === value ? "selected" : ""}>${label}</option>`).join("")}</select>
+        <label class="visually-hidden" for="search">Search fixture library</label><input class="search" id="search" type="search" placeholder="Search fixture library" value="${escapeHtml(query.search)}" />
+        <span class="toolbar-spacer"></span><span class="fixture-badge">fixture</span>
+      </div>
+      <div id="queue-results">${renderConvertingResults(items)}</div>
       <div class="unknown-note">Retry and cancellation affordances are unknown in the captured workflow. No action controls are exposed in fixture mode.</div>
     </section>
-    <div class="footer-line"><span>Items: ${items.length}</span><span>Output policy: ${snapshot?.outputPolicy.directory.state === "observed" ? "fixture-output" : "unknown"}</span></div>
+    <div class="footer-line"><span id="item-count">Items: ${items.length}</span><span>Output policy: ${snapshot?.outputPolicy.directory.state === "observed" ? "fixture-output" : "unknown"}</span></div>
   `;
+}
+
+function renderConvertingResults(items: QueueItem[]): string {
+  if (items.length === 0) return `<div class="empty">No fixture rows match this view.</div>`;
+
+  return `<table class="queue-table"><thead><tr><th scope="col">Title</th><th scope="col">Creator</th><th scope="col">Collection</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody>${items.map((item) => {
+    const row = toQueueRowViewModel(item, findJob(snapshot as WorkflowSnapshot, item.id));
+    return `<tr><td>${escapeHtml(row.title)}</td><td>${escapeHtml(row.creator)}</td><td>${escapeHtml(row.collection)}</td><td>${escapeHtml(row.duration)}</td><td><span class="status ${item.status}">${escapeHtml(row.statusLabel)}</span></td></tr>`;
+  }).join("")}</tbody></table>`;
+}
+
+function renderConvertedQueue(): string {
+  const membership = currentConvertedMembership();
+  const items = filterQueueItems(membership, { filter: "all", search: query.search });
+
+  return `
+    <div class="section-heading"><div><h2>Converted</h2><p>${convertedViewDemoItems.length} synthetic demonstration tracks · no media conversion occurred</p></div><span class="fixture-badge">synthetic demo</span></div>
+    <section class="queue-card" aria-label="Converted demonstration fixture list">
+      <div class="queue-toolbar converted-toolbar">
+        <div class="filter-control"><label for="converted-dimension">Filter by</label><select class="filter-select" id="converted-dimension">${renderDimensionOptions()}</select></div>
+        <div id="secondary-filter-control" class="filter-control">${renderConvertedSecondaryControl()}</div>
+        <div class="filter-control search-control"><label for="search">Search</label><input class="search" id="search" type="search" placeholder="Search Converted demonstration tracks" value="${escapeHtml(query.search)}" /></div>
+        <span class="toolbar-spacer"></span><span class="fixture-badge">fixture</span>
+      </div>
+      <p id="result-count" class="result-count" role="status" aria-atomic="true" aria-controls="queue-results">${formatResultCount(items.length)}</p>
+      <div id="queue-results">${renderConvertedResults(items, membership.length)}</div>
+    </section>
+  `;
+}
+
+function renderDimensionOptions(): string {
+  const dimensions = [
+    ["all", "All"],
+    ["artist", "Artist"],
+    ["album", "Album"],
+  ] as const;
+  return dimensions.map(([value, label]) => `<option value="${value}" ${convertedSelection.dimension === value ? "selected" : ""}>${label}</option>`).join("");
+}
+
+function renderConvertedSecondaryControl(): string {
+  if (convertedSelection.dimension === "all") return "";
+
+  const isArtist = convertedSelection.dimension === "artist";
+  const inclusiveValue = isArtist ? "all-artists" : "all-albums";
+  const inclusiveLabel = isArtist ? "All Artists" : "All Albums";
+  const specificValues = isArtist ? getArtistOptions() : getAlbumOptions();
+  const selectedKey = typeof convertedSelection.value === "string" ? undefined : convertedSelection.value.key;
+  const label = isArtist ? "Artist" : "Album";
+  const options = specificValues.map((value, index) => {
+    const selected = value === selectedKey ? "selected" : "";
+    return `<option value="specific-${index}" data-filter-key="${escapeHtml(value)}" ${selected}>${escapeHtml(value)}</option>`;
+  }).join("");
+
+  return `<label for="converted-value">${label}</label><select class="filter-select" id="converted-value"><option value="${inclusiveValue}" ${convertedSelection.value === inclusiveValue ? "selected" : ""}>${inclusiveLabel}</option>${options}</select>`;
+}
+
+function getArtistOptions(): string[] {
+  const values = convertedViewDemoItems.flatMap((item) => item.referenceMetadata?.artistCredits ?? []);
+  return uniqueSortedValues(values);
+}
+
+function getAlbumOptions(): string[] {
+  const values = convertedViewDemoItems.flatMap((item) => item.referenceMetadata?.album ? [item.referenceMetadata.album] : []);
+  return uniqueSortedValues(values);
+}
+
+function uniqueSortedValues(values: string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))]
+    .sort((left, right) => optionCollator.compare(left, right) || compareCodeUnits(left, right));
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function currentConvertedMembership(): ConvertedFilterItem[] {
+  return projectConvertedFilter(convertedViewDemoItems, convertedSelection);
+}
+
+function formatResultCount(count: number): string {
+  return `${count} result${count === 1 ? "" : "s"}`;
+}
+
+export function getConvertedEmptyState(
+  totalConvertedCount: number,
+  membershipCount: number,
+  visibleCount: number,
+  searchText: string,
+): ConvertedEmptyState | undefined {
+  if (visibleCount > 0) return undefined;
+  if (totalConvertedCount === 0) {
+    return {
+      kind: "empty-collection",
+      message: "No Converted demonstration tracks are available.",
+      showClearSearch: false,
+    };
+  }
+  if (membershipCount === 0) {
+    return {
+      kind: "empty-selection",
+      message: "No Converted tracks match this selection.",
+      showClearSearch: false,
+    };
+  }
+
+  const normalizedSearch = searchText.trim();
+  if (normalizedSearch.length > 0) {
+    return {
+      kind: "no-search-results",
+      message: `No tracks match ‘${normalizedSearch}’ within this selection.`,
+      showClearSearch: true,
+    };
+  }
+
+  return {
+    kind: "empty-selection",
+    message: "No Converted tracks match this selection.",
+    showClearSearch: false,
+  };
+}
+
+function renderConvertedResults(items: ConvertedFilterItem[], membershipCount: number): string {
+  if (items.length === 0) {
+    const emptyState = getConvertedEmptyState(
+      convertedViewDemoItems.length,
+      membershipCount,
+      items.length,
+      query.search,
+    );
+    if (!emptyState) return "";
+    return `<div class="empty converted-empty" id="converted-empty" data-empty-kind="${emptyState.kind}"><p>${escapeHtml(emptyState.message)}</p>${emptyState.showClearSearch ? `<button class="clear-search" id="clear-search" type="button">Clear Search</button>` : ""}</div>`;
+  }
+
+  return `<table class="queue-table converted-table"><caption class="visually-hidden">Converted synthetic demonstration tracks</caption><thead><tr><th scope="col">Title</th><th scope="col">Artist</th><th scope="col">Album</th><th scope="col">Duration</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td></tr>`).join("")}</tbody></table>`;
 }
 
 function wireEvents(): void {
@@ -97,12 +263,93 @@ function wireEvents(): void {
 
   document.querySelector<HTMLSelectElement>("#filter")?.addEventListener("change", (event) => {
     query.filter = (event.target as HTMLSelectElement).value as QueueFilter;
-    renderShell();
+    updateActiveQueueResults();
   });
+
+  document.querySelector<HTMLSelectElement>("#converted-dimension")?.addEventListener("change", (event) => {
+    const dimension = (event.target as HTMLSelectElement).value;
+    convertedSelection = dimension === "artist"
+      ? { dimension: "artist", value: "all-artists" }
+      : dimension === "album"
+        ? { dimension: "album", value: "all-albums" }
+        : { dimension: "all", value: "all" };
+    renderSecondaryControlInPlace();
+    updateConvertedResults();
+    wireClearSearch();
+  });
+
+  wireSecondaryControl();
+
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("input", (event) => {
     query.search = (event.target as HTMLInputElement).value;
-    renderShell();
+    updateActiveQueueResults();
   });
+
+  wireClearSearch();
+}
+
+function wireSecondaryControl(): void {
+  document.querySelector<HTMLSelectElement>("#converted-value")?.addEventListener("change", (event) => {
+    const select = event.target as HTMLSelectElement;
+    const selectedOption = select.selectedOptions[0];
+    if (select.value === "all-artists") {
+      convertedSelection = { dimension: "artist", value: "all-artists" };
+    } else if (select.value === "all-albums") {
+      convertedSelection = { dimension: "album", value: "all-albums" };
+    } else if (selectedOption?.dataset.filterKey && convertedSelection.dimension === "artist") {
+      convertedSelection = {
+        dimension: "artist",
+        value: { kind: "specific", key: selectedOption.dataset.filterKey },
+      };
+    } else if (selectedOption?.dataset.filterKey && convertedSelection.dimension === "album") {
+      convertedSelection = {
+        dimension: "album",
+        value: { kind: "specific", key: selectedOption.dataset.filterKey },
+      };
+    }
+    updateConvertedResults();
+    wireClearSearch();
+  });
+}
+
+function renderSecondaryControlInPlace(): void {
+  const secondaryControl = document.querySelector<HTMLDivElement>("#secondary-filter-control");
+  if (!secondaryControl) return;
+  secondaryControl.innerHTML = renderConvertedSecondaryControl();
+  wireSecondaryControl();
+}
+
+function wireClearSearch(): void {
+  document.querySelector<HTMLButtonElement>("#clear-search")?.addEventListener("click", () => {
+    const search = document.querySelector<HTMLInputElement>("#search");
+    query.search = "";
+    if (search) search.value = "";
+    updateActiveQueueResults();
+    search?.focus();
+    search?.setSelectionRange(0, 0);
+  });
+}
+
+function updateActiveQueueResults(): void {
+  if (activeView === "converted") {
+    updateConvertedResults();
+  } else if (activeView === "converting" && snapshot) {
+    const projection = projectQueueView(snapshot, "converting", query);
+    const results = document.querySelector<HTMLDivElement>("#queue-results");
+    if (results) results.innerHTML = renderConvertingResults(projection.visibleItems);
+    const itemCount = document.querySelector<HTMLSpanElement>("#item-count");
+    if (itemCount) itemCount.textContent = `Items: ${projection.visibleItems.length}`;
+  }
+  wireClearSearch();
+}
+
+function updateConvertedResults(): void {
+  const membership = currentConvertedMembership();
+  const items = filterQueueItems(membership, { filter: "all", search: query.search });
+  const results = document.querySelector<HTMLDivElement>("#queue-results");
+  if (results) results.innerHTML = renderConvertedResults(items, membership.length);
+  const resultCount = document.querySelector<HTMLParagraphElement>("#result-count");
+  if (resultCount) resultCount.textContent = formatResultCount(items.length);
 }
 
 void window.workflowApi.getFixture().then((loadedSnapshot) => {
