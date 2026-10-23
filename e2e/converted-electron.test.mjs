@@ -17,6 +17,8 @@ const electronExecutable = path.join(
 );
 const expectedTitles = ["Shared Lead", "Alpha Other"];
 const timeoutMs = 15_000;
+const convertedRowsSelector =
+  'section[aria-label="Converted demonstration fixture list"] tbody tr';
 
 function isolatedEnvironment() {
   const environment = Object.fromEntries(
@@ -56,7 +58,7 @@ function waitForProcessExit(child, timeout = timeoutMs) {
   });
 }
 
-async function runAcceptanceLaunch(attempt) {
+async function withElectronLaunch(scenario, callback) {
   const profileRoot = await mkdtemp(path.join(os.tmpdir(), "audfree-electron-e2e-"));
   const requestedUserDataDir = path.join(profileRoot, "user-data");
   const artifactsDir = path.join(profileRoot, "artifacts");
@@ -64,7 +66,7 @@ async function runAcceptanceLaunch(attempt) {
   const userDataDir = await realpath(requestedUserDataDir);
 
   const diagnostics = {
-    attempt,
+    scenario,
     profileRoot,
     userDataDir,
     artifactsDir,
@@ -130,34 +132,7 @@ async function runAcceptanceLaunch(attempt) {
       "Electron sessionData must remain inside the prelaunch isolated userData directory",
     );
 
-    await page.getByRole("button", { name: "Converted", exact: true }).click();
-
-    const filterBy = page.getByLabel("Filter by", { exact: true });
-    const resultRows = page.locator(
-      'section[aria-label="Converted demonstration fixture list"] tbody tr',
-    );
-    await resultRows.first().waitFor({ state: "visible" });
-    assert.equal(await filterBy.inputValue(), "all");
-    assert.equal(await resultRows.count(), 5);
-
-    await filterBy.selectOption("artist");
-
-    const artistSelect = page.getByLabel("Artist", { exact: true });
-    await artistSelect.waitFor({ state: "visible" });
-    assert.equal(await artistSelect.inputValue(), "all-artists");
-    assert.equal(await resultRows.count(), 5);
-
-    await artistSelect.selectOption({ label: "Lead Artist" });
-    assert.equal(
-      await artistSelect.locator("option:checked").textContent(),
-      "Lead Artist",
-    );
-    assert.equal(await resultRows.count(), expectedTitles.length);
-    assert.deepEqual(
-      await resultRows.locator("td:first-child").allTextContents(),
-      expectedTitles,
-    );
-    assert.equal(await page.getByRole("status").textContent(), "2 results");
+    await callback({ electronApp, page });
 
     passed = true;
   } catch (error) {
@@ -189,8 +164,209 @@ async function runAcceptanceLaunch(attempt) {
   }
 }
 
-test("Converted Electron vertical slice survives three isolated launches", async () => {
-  for (const attempt of [1, 2, 3]) {
-    await runAcceptanceLaunch(attempt);
-  }
+async function openConverted(page) {
+  await page.getByRole("button", { name: "Converted", exact: true }).click();
+  const resultRows = page.locator(convertedRowsSelector);
+  await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+  await resultRows.first().waitFor({ state: "visible" });
+  return resultRows;
+}
+
+async function resultTitles(resultRows) {
+  return (await resultRows.locator("td:first-child").allTextContents()).map((title) => title.trim());
+}
+
+async function assertConvertedResults(page, resultRows, expected) {
+  if (expected.length > 0) await resultRows.first().waitFor({ state: "visible" });
+  assert.equal(await resultRows.count(), expected.length);
+  assert.deepEqual(await resultTitles(resultRows), expected);
+  assert.equal(await page.getByRole("status").textContent(), `${expected.length} result${expected.length === 1 ? "" : "s"}`);
+}
+
+async function selectConvertedDimension(page, label) {
+  const dimension = page.getByLabel("Filter by", { exact: true });
+  await dimension.selectOption({ label });
+  const secondary = page.getByLabel(label, { exact: true });
+  await secondary.waitFor({ state: "visible" });
+  return secondary;
+}
+
+async function selectConvertedValue(page, label) {
+  const secondary = page.getByLabel(/^(Artist|Album)$/, { exact: true });
+  await secondary.selectOption({ label });
+  assert.equal(await secondary.locator("option:checked").textContent(), label);
+  return secondary;
+}
+
+async function assertSelectedLabel(select, label) {
+  assert.equal(await select.locator("option:checked").textContent(), label);
+}
+
+async function setSearch(page, value) {
+  const search = page.getByLabel("Search", { exact: true });
+  await search.fill(value);
+  return search;
+}
+
+test("Converted Slice 1 functional Electron acceptance", async (t) => {
+  await t.test("Converted Electron vertical slice survives three isolated launches", async () => {
+    for (const attempt of [1, 2, 3]) {
+      await withElectronLaunch(`artist-baseline-${attempt}`, async ({ page }) => {
+        const resultRows = await openConverted(page);
+        const filterBy = page.getByLabel("Filter by", { exact: true });
+        assert.equal(await filterBy.inputValue(), "all");
+        assert.equal(await resultRows.count(), 5);
+
+        const artistSelect = await selectConvertedDimension(page, "Artist");
+        assert.equal(await artistSelect.inputValue(), "all-artists");
+        assert.equal(await resultRows.count(), 5);
+
+        await selectConvertedValue(page, "Lead Artist");
+        await assertConvertedResults(page, resultRows, expectedTitles);
+      });
+    }
+  });
+
+  await t.test("filters Converted rows by Album with a conditional selector", async () => {
+    await withElectronLaunch("album-filtering", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      const albumSelect = await selectConvertedDimension(page, "Album");
+      assert.equal(await albumSelect.inputValue(), "all-albums");
+      assert.equal(await resultRows.count(), 5);
+
+      await selectConvertedValue(page, "Shared Album");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Shared Other"]);
+      const titles = await resultTitles(resultRows);
+      assert.equal(titles.includes("Alpha Other"), false);
+      assert.equal(titles.includes("Unrelated Track"), false);
+    });
+  });
+
+  await t.test("orders Artist and Album options alphabetically with inclusive defaults", async () => {
+    await withElectronLaunch("selector-ordering", async ({ page }) => {
+      await openConverted(page);
+      const dimension = page.getByLabel("Filter by", { exact: true });
+      assert.deepEqual(await dimension.locator("option").allTextContents(), ["All", "Artist", "Album"]);
+
+      const artistSelect = await selectConvertedDimension(page, "Artist");
+      assert.deepEqual(await artistSelect.locator("option").allTextContents(), [
+        "All Artists",
+        "Alpha Collaborator",
+        "Lead Artist",
+        "Other Artist",
+        "Unrelated Artist",
+      ]);
+
+      const albumSelect = await selectConvertedDimension(page, "Album");
+      assert.deepEqual(await albumSelect.locator("option").allTextContents(), [
+        "All Albums",
+        "Other Album",
+        "Shared Album",
+        "Unrelated Album",
+      ]);
+    });
+  });
+
+  await t.test("matches Search queries and exposes contextual no-results recovery", async () => {
+    await withElectronLaunch("search-empty-state", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      const search = await setSearch(page, "shared");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Shared Other"]);
+      assert.equal(await search.inputValue(), "shared");
+
+      await setSearch(page, "no such track");
+      await assertConvertedResults(page, resultRows, []);
+      assert.equal(
+        await page.locator("#converted-empty").textContent(),
+        "No tracks match ‘no such track’ within this selection.Clear Search",
+      );
+      await page.getByRole("button", { name: "Clear Search", exact: true }).click();
+      assert.equal(await search.inputValue(), "");
+      await assertConvertedResults(page, resultRows, [
+        "Shared Lead",
+        "Shared Other",
+        "Alpha Other",
+        "Unrelated Track",
+        "Missing Metadata",
+      ]);
+      assert.equal(await page.getByRole("button", { name: "Clear Search", exact: true }).count(), 0);
+    });
+  });
+
+  await t.test("composes Search with active Artist and Album filters", async () => {
+    await withElectronLaunch("search-composition", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      await selectConvertedDimension(page, "Artist");
+      await selectConvertedValue(page, "Lead Artist");
+      await assertConvertedResults(page, resultRows, expectedTitles);
+
+      await setSearch(page, "Alpha Other");
+      await assertConvertedResults(page, resultRows, ["Alpha Other"]);
+      await setSearch(page, "Unrelated Track");
+      await assertConvertedResults(page, resultRows, []);
+      await page.getByRole("button", { name: "Clear Search", exact: true }).click();
+      await assertConvertedResults(page, resultRows, expectedTitles);
+
+      await selectConvertedDimension(page, "Album");
+      await selectConvertedValue(page, "Shared Album");
+      await setSearch(page, "Shared Lead");
+      await assertConvertedResults(page, resultRows, ["Shared Lead"]);
+      await setSearch(page, "Alpha Other");
+      await assertConvertedResults(page, resultRows, []);
+      await page.getByRole("button", { name: "Clear Search", exact: true }).click();
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Shared Other"]);
+    });
+  });
+
+  await t.test("preserves Artist and Album selections across navigation", async () => {
+    await withElectronLaunch("navigation-preservation", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      await selectConvertedDimension(page, "Artist");
+      const artistSelect = await selectConvertedValue(page, "Lead Artist");
+      await assertConvertedResults(page, resultRows, expectedTitles);
+
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByLabel("Filter items", { exact: true }).waitFor({ state: "visible" });
+      await page.getByRole("button", { name: "Converted", exact: true }).click();
+      await page.getByLabel("Artist", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.getByLabel("Filter by", { exact: true }).inputValue(), "artist");
+      await assertSelectedLabel(artistSelect, "Lead Artist");
+      await assertConvertedResults(page, resultRows, expectedTitles);
+
+      await selectConvertedDimension(page, "Album");
+      const albumSelect = await selectConvertedValue(page, "Shared Album");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Shared Other"]);
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("button", { name: "Converted", exact: true }).click();
+      await page.getByLabel("Album", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.getByLabel("Filter by", { exact: true }).inputValue(), "album");
+      await assertSelectedLabel(albumSelect, "Shared Album");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Shared Other"]);
+    });
+  });
+
+  await t.test("keeps Converting status controls separate from Converted filters", async () => {
+    await withElectronLaunch("view-control-separation", async ({ page }) => {
+      await openConverted(page);
+      await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.getByLabel("Filter items", { exact: true }).count(), 0);
+      assert.equal(await page.getByLabel("Artist", { exact: true }).count(), 0);
+      assert.equal(await page.getByLabel("Album", { exact: true }).count(), 0);
+
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      const statusFilter = page.getByLabel("Filter items", { exact: true });
+      await statusFilter.waitFor({ state: "visible" });
+      assert.equal(await page.getByLabel("Filter by", { exact: true }).count(), 0);
+      assert.equal(await page.getByLabel("Artist", { exact: true }).count(), 0);
+      assert.equal(await page.getByLabel("Album", { exact: true }).count(), 0);
+      assert.deepEqual(await statusFilter.locator("option").allTextContents(), [
+        "All",
+        "Waiting",
+        "Analyzing",
+        "Converting",
+        "Failed",
+        "Converted",
+      ]);
+    });
+  });
 });
