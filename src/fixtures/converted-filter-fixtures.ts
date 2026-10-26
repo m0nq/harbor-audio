@@ -5,6 +5,7 @@ interface ConvertedFixtureInput {
   title: string;
   creator: string;
   collection: string;
+  duration?: string;
   status?: ConvertedFilterItem["status"];
   referenceMetadata?: ConvertedFilterMetadata;
 }
@@ -25,7 +26,7 @@ function convertedItem(input: ConvertedFixtureInput): ConvertedFilterItem {
     title: input.title,
     creator: input.creator,
     collection: input.collection,
-    duration: "03:00",
+    duration: input.duration ?? "03:00",
     status: input.status ?? "converted",
     ...(referenceMetadata ? { referenceMetadata } : {}),
   });
@@ -38,6 +39,7 @@ export const convertedFilterItems: readonly ConvertedFilterItem[] = Object.freez
     title: "Shared Lead",
     creator: "Lead Artist & Alpha Collaborator",
     collection: "Shared Album",
+    duration: "03:00",
     referenceMetadata: {
       artistCredits: ["Lead Artist", "Alpha Collaborator", "Alpha Collaborator"],
       album: "Shared Album",
@@ -48,6 +50,7 @@ export const convertedFilterItems: readonly ConvertedFilterItem[] = Object.freez
     title: "Shared Other",
     creator: "Other Artist",
     collection: "Shared Album",
+    duration: "04:08",
     referenceMetadata: {
       artistCredits: ["Other Artist"],
       album: "Shared Album",
@@ -58,6 +61,7 @@ export const convertedFilterItems: readonly ConvertedFilterItem[] = Object.freez
     title: "Alpha Other",
     creator: "Lead Artist & Alpha Collaborator",
     collection: "Other Album",
+    duration: "02:58",
     referenceMetadata: {
       artistCredits: ["Lead Artist", "Alpha Collaborator"],
       album: "Other Album",
@@ -68,6 +72,7 @@ export const convertedFilterItems: readonly ConvertedFilterItem[] = Object.freez
     title: "Unrelated Track",
     creator: "Unrelated Artist",
     collection: "Unrelated Album",
+    duration: "05:12",
     referenceMetadata: {
       artistCredits: ["Unrelated Artist"],
       album: "Unrelated Album",
@@ -78,6 +83,7 @@ export const convertedFilterItems: readonly ConvertedFilterItem[] = Object.freez
     title: "Missing Metadata",
     creator: "—",
     collection: "—",
+    duration: "00:45",
   }),
   convertedItem({
     id: "queue-not-converted",

@@ -208,6 +208,26 @@ async function setSearch(page, value) {
   return search;
 }
 
+async function sortBy(page, label, direction = "ascending") {
+  const button = page.getByRole("button", { name: `Sort by ${label}`, exact: true });
+  const header = page.locator(`th:has(button[aria-label="Sort by ${label}"])`);
+  await header.waitFor({ state: "visible" });
+  await button.click();
+  await page.waitForFunction(
+    ({ label: expectedLabel, direction: expectedDirection }) => [...document.querySelectorAll("th")].some((candidate) => (
+      candidate.getAttribute("aria-sort") === expectedDirection
+      && candidate.querySelector("button")?.getAttribute("aria-label") === `Sort by ${expectedLabel}`
+    )),
+    { label, direction },
+    { timeout: timeoutMs },
+  );
+  return header;
+}
+
+async function clearSort(page) {
+  await page.getByRole("button", { name: "Clear sort", exact: true }).click();
+}
+
 test("Converted Slice 1 functional Electron acceptance", async (t) => {
   await t.test("Converted Electron vertical slice survives three isolated launches", async () => {
     for (const attempt of [1, 2, 3]) {
@@ -239,6 +259,69 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
       const titles = await resultTitles(resultRows);
       assert.equal(titles.includes("Alpha Other"), false);
       assert.equal(titles.includes("Unrelated Track"), false);
+    });
+  });
+
+  await t.test("sorts Converted rows by each visible column and clears back to source order", async () => {
+    await withElectronLaunch("sorting-order-and-clear", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      await assertConvertedResults(page, resultRows, [
+        "Shared Lead",
+        "Shared Other",
+        "Alpha Other",
+        "Unrelated Track",
+        "Missing Metadata",
+      ]);
+
+      const titleHeader = await sortBy(page, "Title", "ascending");
+      await assertConvertedResults(page, resultRows, [
+        "Alpha Other",
+        "Missing Metadata",
+        "Shared Lead",
+        "Shared Other",
+        "Unrelated Track",
+      ]);
+      assert.equal(await titleHeader.getAttribute("aria-sort"), "ascending");
+
+      await sortBy(page, "Title", "descending");
+      await assertConvertedResults(page, resultRows, [
+        "Unrelated Track",
+        "Shared Other",
+        "Shared Lead",
+        "Missing Metadata",
+        "Alpha Other",
+      ]);
+      assert.equal(await titleHeader.getAttribute("aria-sort"), "descending");
+
+      const durationHeader = await sortBy(page, "Duration", "ascending");
+      await assertConvertedResults(page, resultRows, [
+        "Missing Metadata",
+        "Alpha Other",
+        "Shared Lead",
+        "Shared Other",
+        "Unrelated Track",
+      ]);
+      assert.equal(await durationHeader.getAttribute("aria-sort"), "ascending");
+
+      const albumHeader = await sortBy(page, "Album", "ascending");
+      await assertConvertedResults(page, resultRows, [
+        "Missing Metadata",
+        "Alpha Other",
+        "Shared Lead",
+        "Shared Other",
+        "Unrelated Track",
+      ]);
+      assert.equal(await albumHeader.getAttribute("aria-sort"), "ascending");
+
+      await clearSort(page);
+      await assertConvertedResults(page, resultRows, [
+        "Shared Lead",
+        "Shared Other",
+        "Alpha Other",
+        "Unrelated Track",
+        "Missing Metadata",
+      ]);
+      assert.equal(await page.getByRole("button", { name: "Clear sort", exact: true }).count(), 0);
     });
   });
 
@@ -342,6 +425,59 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
       assert.equal(await page.getByLabel("Filter by", { exact: true }).inputValue(), "album");
       await assertSelectedLabel(albumSelect, "Shared Album");
       await assertConvertedResults(page, resultRows, ["Shared Lead", "Shared Other"]);
+    });
+  });
+
+  await t.test("composes sorting with filters and Search across navigation", async () => {
+    await withElectronLaunch("sorting-composition-navigation", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      await selectConvertedDimension(page, "Artist");
+      await selectConvertedValue(page, "Lead Artist");
+      await sortBy(page, "Title", "ascending");
+      await assertConvertedResults(page, resultRows, ["Alpha Other", "Shared Lead"]);
+
+      await setSearch(page, "Shared");
+      await assertConvertedResults(page, resultRows, ["Shared Lead"]);
+      await setSearch(page, "");
+      await assertConvertedResults(page, resultRows, ["Alpha Other", "Shared Lead"]);
+
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("button", { name: "Converted", exact: true }).click();
+      await page.getByLabel("Artist", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.getByLabel("Filter by", { exact: true }).inputValue(), "artist");
+      await assertSelectedLabel(page.getByLabel("Artist", { exact: true }), "Lead Artist");
+      await assertConvertedResults(page, resultRows, ["Alpha Other", "Shared Lead"]);
+      assert.equal(await page.locator('th[aria-sort="ascending"] button[aria-label="Sort by Title"]').count(), 1);
+
+      await clearSort(page);
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Alpha Other"]);
+      await assertSelectedLabel(page.getByLabel("Artist", { exact: true }), "Lead Artist");
+    });
+  });
+
+  await t.test("resets Converted sorting on a fresh isolated launch", async () => {
+    await withElectronLaunch("sorting-reset-first-launch", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      await sortBy(page, "Title", "ascending");
+      await assertConvertedResults(page, resultRows, [
+        "Alpha Other",
+        "Missing Metadata",
+        "Shared Lead",
+        "Shared Other",
+        "Unrelated Track",
+      ]);
+    });
+
+    await withElectronLaunch("sorting-reset-second-launch", async ({ page }) => {
+      const resultRows = await openConverted(page);
+      await assertConvertedResults(page, resultRows, [
+        "Shared Lead",
+        "Shared Other",
+        "Alpha Other",
+        "Unrelated Track",
+        "Missing Metadata",
+      ]);
+      assert.equal(await page.getByRole("button", { name: "Clear sort", exact: true }).count(), 0);
     });
   });
 

@@ -8,6 +8,7 @@ import type {
   QueueQuery,
   WorkflowSnapshot,
 } from "../domain/contracts.js";
+import type { ConvertedSortColumn, ConvertedSortState } from "../domain/converted-sort.js";
 import {
   filterLabels,
   filterQueueItems,
@@ -16,6 +17,7 @@ import {
   toQueueRowViewModel,
 } from "../domain/workflow.js";
 import { projectConvertedFilter } from "../domain/converted-filter.js";
+import { sortConvertedItems } from "../domain/converted-sort.js";
 import { convertedViewDemoItems } from "../fixtures/converted-filter-fixtures.js";
 
 declare global {
@@ -36,6 +38,7 @@ let snapshot: WorkflowSnapshot | undefined;
 let activeView: FixtureView = "browser";
 let query: QueueQuery = { filter: "all", search: "" };
 let convertedSelection: ConvertedFilterSelection = { dimension: "all", value: "all" };
+let convertedSort: ConvertedSortState | null = null;
 
 const optionCollator = new Intl.Collator("en-US", { sensitivity: "base", numeric: false });
 
@@ -129,7 +132,7 @@ function renderConvertingResults(items: QueueItem[]): string {
 
 function renderConvertedQueue(): string {
   const membership = currentConvertedMembership();
-  const items = filterQueueItems(membership, { filter: "all", search: query.search });
+  const items = currentConvertedItems(membership);
 
   return `
     <div class="section-heading"><div><h2>Converted</h2><p>${convertedViewDemoItems.length} synthetic demonstration tracks · no media conversion occurred</p></div><span class="fixture-badge">synthetic demo</span></div>
@@ -138,6 +141,7 @@ function renderConvertedQueue(): string {
         <div class="filter-control"><label for="converted-dimension">Filter by</label><select class="filter-select" id="converted-dimension">${renderDimensionOptions()}</select></div>
         <div id="secondary-filter-control" class="filter-control">${renderConvertedSecondaryControl()}</div>
         <div class="filter-control search-control"><label for="search">Search</label><input class="search" id="search" type="search" placeholder="Search Converted demonstration tracks" value="${escapeHtml(query.search)}" /></div>
+        ${convertedSort ? `<button class="clear-sort" id="clear-sort" type="button">Clear sort</button>` : ""}
         <span class="toolbar-spacer"></span><span class="fixture-badge">fixture</span>
       </div>
       <p id="result-count" class="result-count" role="status" aria-atomic="true" aria-controls="queue-results">${formatResultCount(items.length)}</p>
@@ -249,7 +253,15 @@ function renderConvertedResults(items: ConvertedFilterItem[], membershipCount: n
     return `<div class="empty converted-empty" id="converted-empty" data-empty-kind="${emptyState.kind}"><p>${escapeHtml(emptyState.message)}</p>${emptyState.showClearSearch ? `<button class="clear-search" id="clear-search" type="button">Clear Search</button>` : ""}</div>`;
   }
 
-  return `<table class="queue-table converted-table"><caption class="visually-hidden">Converted synthetic demonstration tracks</caption><thead><tr><th scope="col">Title</th><th scope="col">Artist</th><th scope="col">Album</th><th scope="col">Duration</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="queue-table converted-table"><caption class="visually-hidden">Converted synthetic demonstration tracks</caption><thead><tr>${renderSortHeader("title", "Title")}${renderSortHeader("artist", "Artist")}${renderSortHeader("album", "Album")}${renderSortHeader("duration", "Duration")}</tr></thead><tbody>${items.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td></tr>`).join("")}</tbody></table>`;
+}
+
+function renderSortHeader(column: ConvertedSortColumn, label: string): string {
+  const active = convertedSort?.column === column;
+  const direction = active ? convertedSort?.direction : undefined;
+  const indicator = direction === "ascending" ? " ↑" : direction === "descending" ? " ↓" : "";
+  const ariaSort = direction === "ascending" ? "ascending" : direction === "descending" ? "descending" : "none";
+  return `<th scope="col" aria-sort="${ariaSort}"><button class="sort-button" type="button" data-sort-column="${column}" aria-label="Sort by ${label}">${label}<span aria-hidden="true">${indicator}</span></button></th>`;
 }
 
 function wireEvents(): void {
@@ -279,6 +291,7 @@ function wireEvents(): void {
   });
 
   wireSecondaryControl();
+  wireSortControls();
 
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("input", (event) => {
     query.search = (event.target as HTMLInputElement).value;
@@ -286,6 +299,27 @@ function wireEvents(): void {
   });
 
   wireClearSearch();
+}
+
+function wireSortHeaderControls(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-sort-column]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const column = button.dataset.sortColumn as ConvertedSortColumn;
+      const direction = convertedSort?.column === column && convertedSort.direction === "ascending"
+        ? "descending"
+        : "ascending";
+      convertedSort = { column, direction };
+      renderShell();
+    });
+  });
+}
+
+function wireSortControls(): void {
+  wireSortHeaderControls();
+  document.querySelector<HTMLButtonElement>("#clear-sort")?.addEventListener("click", () => {
+    convertedSort = null;
+    renderShell();
+  });
 }
 
 function wireSecondaryControl(): void {
@@ -345,11 +379,19 @@ function updateActiveQueueResults(): void {
 
 function updateConvertedResults(): void {
   const membership = currentConvertedMembership();
-  const items = filterQueueItems(membership, { filter: "all", search: query.search });
+  const items = currentConvertedItems(membership);
   const results = document.querySelector<HTMLDivElement>("#queue-results");
-  if (results) results.innerHTML = renderConvertedResults(items, membership.length);
+  if (results) {
+    results.innerHTML = renderConvertedResults(items, membership.length);
+    wireSortHeaderControls();
+  }
   const resultCount = document.querySelector<HTMLParagraphElement>("#result-count");
   if (resultCount) resultCount.textContent = formatResultCount(items.length);
+}
+
+function currentConvertedItems(membership: ConvertedFilterItem[]): ConvertedFilterItem[] {
+  const searched = filterQueueItems(membership, { filter: "all", search: query.search });
+  return sortConvertedItems(searched, convertedSort);
 }
 
 void window.workflowApi.getFixture().then((loadedSnapshot) => {

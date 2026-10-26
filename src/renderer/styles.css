@@ -70,10 +70,15 @@ h1 { margin: 8px 0 7px; font-size: 30px; letter-spacing: -0.035em; }
 .converted-empty p { margin: 0; color: var(--ink-muted); }
 .clear-search { padding: 8px 12px; border: 1px solid rgba(230, 120, 93, 0.45); border-radius: 8px; color: #fff; background: var(--accent-soft); }
 .clear-search:hover { background: rgba(230, 120, 93, 0.28); }
+.clear-sort { padding: 8px 12px; border: 1px solid rgba(230, 120, 93, 0.45); border-radius: 8px; color: #fff; background: var(--accent-soft); }
+.clear-sort:hover { background: rgba(230, 120, 93, 0.28); }
 .toolbar-spacer { flex: 1; }
 .fixture-badge { padding: 5px 9px; border: 1px solid rgba(114, 212, 165, 0.28); border-radius: 999px; color: var(--success); font-size: 10px; font-weight: 750; letter-spacing: 0.1em; text-transform: uppercase; }
 .queue-table { width: 100%; border-collapse: collapse; text-align: left; }
 .queue-table th { padding: 12px 18px; color: #6f7b8b; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; }
+.converted-table th { padding: 0; }
+.sort-button { width: 100%; padding: 12px 18px; border: 0; color: inherit; background: transparent; font: inherit; letter-spacing: inherit; text-align: left; text-transform: inherit; }
+.sort-button:hover { color: #f5f7fb; background: rgba(255,255,255,0.03); }
 .queue-table caption { text-align: left; }
 .queue-table td { padding: 15px 18px; border-top: 1px solid var(--line); color: #dce3ef; font-size: 12px; }
 .queue-table td:first-child { color: #fff; font-weight: 650; }

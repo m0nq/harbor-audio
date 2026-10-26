@@ -186,6 +186,20 @@ async function setSearch(harness, value) {
   await settleRenderer();
 }
 
+async function sortBy(harness, column) {
+  const button = documentFor(harness).querySelector(`[data-sort-column="${column}"]`);
+  assert.ok(button, `expected Converted ${column} sort control`);
+  button.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
+  await settleRenderer();
+}
+
+async function clearSort(harness) {
+  const button = documentFor(harness).querySelector("#clear-sort");
+  assert.ok(button, "expected a Clear sort control");
+  button.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
+  await settleRenderer();
+}
+
 async function clearSearch(harness) {
   const document = documentFor(harness);
   const button = document.querySelector("#clear-search");
@@ -243,12 +257,78 @@ test("compiled renderer interaction suite", async (t) => {
       assert.equal(resultCount(document), "5 results");
       assert.match(queueSummary(document), /synthetic demonstration tracks/);
       assert.match(queueSummary(document), /no media conversion occurred/);
-      assert.equal(document.querySelectorAll(".queue-table th button").length, 0);
+      assert.deepEqual(
+        [...document.querySelectorAll(".converted-table th button")].map((button) => button.dataset.sortColumn),
+        ["title", "artist", "album", "duration"],
+      );
+      assert.equal(document.querySelector("#clear-sort"), null);
 
       await clickView(harness, "browser");
       assert.equal(heading(document), "Browse a local source");
       assert.deepEqual(sourceTitles(document), ["Aurora Lines", "Blue Hour", "Lantern Room"]);
       assert.equal(document.querySelector('section[aria-label$="fixture list"]'), null);
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  await t.test("sorts Converted rows, preserves filters across navigation, and clears without resetting them", async () => {
+    const harness = await createRendererDom("converted-sorting");
+
+    try {
+      const document = documentFor(harness);
+      await clickView(harness, "converted");
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
+
+      await sortBy(harness, "title");
+      assert.deepEqual(queueTitles(document), ["Alpha Other", "Missing Metadata", "Shared Lead", "Shared Other", "Unrelated Track"]);
+      assert.equal(document.querySelector('th[aria-sort="ascending"] [data-sort-column="title"]')?.textContent, "Title ↑");
+      assert.equal(document.querySelector("#clear-sort")?.textContent, "Clear sort");
+
+      await sortBy(harness, "title");
+      assert.deepEqual(queueTitles(document), ["Unrelated Track", "Shared Other", "Shared Lead", "Missing Metadata", "Alpha Other"]);
+      assert.equal(document.querySelector('th[aria-sort="descending"] [data-sort-column="title"]')?.textContent, "Title ↓");
+
+      await sortBy(harness, "duration");
+      assert.deepEqual(queueTitles(document), ["Missing Metadata", "Alpha Other", "Shared Lead", "Shared Other", "Unrelated Track"]);
+      await sortBy(harness, "duration");
+      assert.deepEqual(queueTitles(document), ["Unrelated Track", "Shared Other", "Shared Lead", "Alpha Other", "Missing Metadata"]);
+
+      await setDimension(harness, "artist");
+      await setSecondaryByLabel(harness, "Lead Artist");
+      await setSearch(harness, "");
+      await sortBy(harness, "title");
+      assert.deepEqual(queueTitles(document), ["Alpha Other", "Shared Lead"]);
+      await clickView(harness, "converting");
+      await clickView(harness, "converted");
+      assert.equal(document.querySelector("#converted-dimension")?.value, "artist");
+      assert.equal(document.querySelector("#converted-value")?.selectedOptions[0]?.textContent, "Lead Artist");
+      assert.deepEqual(queueTitles(document), ["Alpha Other", "Shared Lead"]);
+
+      await clearSort(harness);
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Alpha Other"]);
+      assert.equal(document.querySelector("#clear-sort"), null);
+      assert.equal(document.querySelector("#converted-value")?.selectedOptions[0]?.textContent, "Lead Artist");
+      assert.equal(document.querySelector("#search")?.value, "");
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  await t.test("starts a fresh renderer session in source order without Converted sort controls active", async () => {
+    const harness = await createRendererDom("converted-sort-reset");
+
+    try {
+      const document = documentFor(harness);
+      await clickView(harness, "converted");
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
+      assert.equal(document.querySelector("#clear-sort"), null);
+      assert.deepEqual(
+        [...document.querySelectorAll(".converted-table th")].map((header) => header.getAttribute("aria-sort")),
+        ["none", "none", "none", "none"],
+      );
       assertRuntimeBoundaries(harness);
     } finally {
       harness.dispose();
@@ -262,6 +342,7 @@ test("compiled renderer interaction suite", async (t) => {
       const document = documentFor(harness);
       await clickView(harness, "converting");
       assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assert.equal(document.querySelectorAll("[data-sort-column]").length, 0);
       assert.deepEqual(optionLabels(document.querySelector("#filter")), [
         "All", "Waiting", "Analyzing", "Converting", "Failed", "Converted",
       ]);
