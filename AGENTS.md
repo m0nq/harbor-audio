@@ -1,7 +1,9 @@
-# AudFree Parity Project Guidance
+# Harbor Audio Project Guidance
 
-AudFree Parity is a personal-use, fixture-backed Electron application. Keep
-the implementation local-only and focused on deterministic functional parity.
+Harbor Audio is a personal-use, fixture-backed Electron application. Keep the
+implementation local-only and focused on deterministic functional parity.
+
+See [README.md](README.md) for the project overview, commands, and boundaries.
 
 ## Architecture and behavior
 
@@ -46,7 +48,8 @@ owned by the test. Preserve failed diagnostics when the harness requires it.
 - Do not add or change dependencies or lockfiles without explicit review and
   authorization; never bypass the hardened dependency and safety hooks.
 - Do not access real AudFree accounts, credentials, or personal application
-  profiles. Do not introduce unapproved network operations or publication.
+  profiles. AudFree references are external evidence only and do not imply
+  affiliation. Do not introduce unapproved network operations or publication.
 - Do not modify signing, Electron distribution artifacts, security hooks, or
   global Codex configuration without separate authorization.
 - Destructive Git actions, remote mutation, pushes, and commits require
