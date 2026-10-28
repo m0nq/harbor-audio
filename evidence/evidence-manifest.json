@@ -477,12 +477,23 @@
     {
       "id": "EV-A11Y-003",
       "source": "fixture",
-      "fact": "The fixture renderer statically declares a polite root live region, labeled workspace navigation with native buttons, a native filter select, a native search input, a semantic queue table, and text-only status and unknown-state notes.",
+      "fact": "The fixture renderer statically declares labeled workspace navigation with native buttons, native filter selects, a native search input, semantic queue tables, a scoped result-status region, and text-only status and unknown-state notes; the application root is not a live region. The existing Electron functional acceptance baseline and the corrected HARBOR-A11Y-01B downstream keyboard acceptance passed in the validated macOS desktop lane without claiming VoiceOver validation.",
       "confidence": "high",
-      "unresolvedBehavior": ["Runtime focus order, keyboard traversal, screen-reader output, and live-region announcement behavior were not exercised because direct Electron launch exited SIGABRT and browser inspection of the local file URL was blocked."],
+      "unresolvedBehavior": ["Native select ArrowDown/Enter automation behavior is not treated as portable keyboard evidence; physical hardware-keyboard validation, VoiceOver, screen-reader output, and cross-platform behavior remain unvalidated."],
       "provenance": {
         "kind": "fixture-static-accessibility-audit",
-        "artifact": "src/renderer/index.html and src/renderer/renderer.ts; no runtime or reference-app actions"
+        "artifact": "src/renderer/index.html and src/renderer/renderer.ts; accepted Electron functional baseline and isolated HARBOR-A11Y-01B desktop diagnostics; no VoiceOver or reference-app actions"
+      }
+    },
+    {
+      "id": "EV-A11Y-004",
+      "source": "runtime-smoke",
+      "fact": "In the isolated macOS Electron desktop lane, the HARBOR-A11Y-01B ArrowDown/Enter path on #converted-dimension remained value 'all' with selected option 'All', no conditional Artist control, and only keydown/keyup observations. Character typeahead 'ar' selected value 'artist', emitted input/change events, and produced the labeled Artist control. selectOption('artist') likewise selected value 'artist', emitted input/change events, and produced the labeled Artist control. After changing the test assumptions, all 13 child scenarios passed, and the parent suite also passed (14 of 14 total test nodes), including downstream keyboard traversal, Search recovery, sorting, and clear-sort activation.",
+      "confidence": "high",
+      "unresolvedBehavior": ["A physical hardware-keyboard check in a disposable Electron profile remains pending; VoiceOver, screen-reader output, and cross-platform native-select behavior remain unvalidated."],
+      "provenance": {
+        "kind": "isolated-macos-electron-e2e-diagnostic",
+        "artifact": "`/opt/homebrew/bin/node --test e2e/converted-electron.test.mjs`; test-owned userData and sessionData; no personal application profile, credentials, network, or media actions"
       }
     },
     {

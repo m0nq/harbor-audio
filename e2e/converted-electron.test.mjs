@@ -172,6 +172,93 @@ async function openConverted(page) {
   return resultRows;
 }
 
+async function openConvertedWithKeyboard(page) {
+  const converted = page.getByRole("button", { name: "Converted", exact: true });
+  await converted.focus();
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.getAttribute("data-view")),
+    "converted",
+  );
+  await converted.press("Enter");
+  const resultRows = page.locator(convertedRowsSelector);
+  await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+  await resultRows.first().waitFor({ state: "visible" });
+  return resultRows;
+}
+
+async function observeConvertedDimensionEvents(page) {
+  await page.evaluate(() => {
+    const dimension = document.querySelector("#converted-dimension");
+    if (!dimension) throw new Error("expected Converted dimension selector");
+
+    const events = [];
+    const record = (event) => {
+      const select = event.currentTarget;
+      const selected = select.selectedOptions[0];
+      events.push({
+        type: event.type,
+        key: event instanceof KeyboardEvent ? event.key : null,
+        value: select.value,
+        selectedOption: selected
+          ? { value: selected.value, text: selected.textContent }
+          : null,
+      });
+    };
+
+    for (const type of ["keydown", "keyup", "input", "change"]) {
+      dimension.addEventListener(type, record);
+    }
+    window.__harborA11y01BDimensionEvents = events;
+  });
+}
+
+async function convertedDimensionDiagnostics(page) {
+  return page.evaluate(() => {
+    const dimension = document.querySelector("#converted-dimension");
+    const selected = dimension?.selectedOptions[0];
+    const active = document.activeElement;
+    const conditional = document.querySelector("#converted-value");
+
+    return {
+      dimensionValue: dimension?.value ?? null,
+      selectedOption: selected
+        ? { value: selected.value, text: selected.textContent }
+        : null,
+      focusedElement: active
+        ? {
+          id: active.id,
+          tag: active.tagName,
+          ariaLabel: active.getAttribute("aria-label"),
+        }
+        : null,
+      conditionalControl: {
+        present: Boolean(conditional),
+        id: conditional?.id ?? null,
+        label: document.querySelector('label[for="converted-value"]')?.textContent?.trim() ?? null,
+      },
+      events: Array.isArray(window.__harborA11y01BDimensionEvents)
+        ? window.__harborA11y01BDimensionEvents
+        : [],
+    };
+  });
+}
+
+async function runConvertedDimensionDiagnostic(scenario, activate) {
+  let diagnostics;
+  await withElectronLaunch(scenario, async ({ page }) => {
+    await openConvertedWithKeyboard(page);
+    const dimension = page.getByLabel("Filter by", { exact: true });
+    await observeConvertedDimensionEvents(page);
+    await dimension.focus();
+    await activate({ dimension, page });
+    diagnostics = await convertedDimensionDiagnostics(page);
+    console.log(`[HARBOR-A11Y-01B] ${scenario}: ${JSON.stringify(diagnostics)}`);
+    assert.ok(diagnostics.selectedOption, JSON.stringify(diagnostics));
+    assert.ok(Array.isArray(diagnostics.events), JSON.stringify(diagnostics));
+  });
+  return diagnostics;
+}
+
 async function resultTitles(resultRows) {
   return (await resultRows.locator("td:first-child").allTextContents()).map((title) => title.trim());
 }
@@ -213,6 +300,27 @@ async function sortBy(page, label, direction = "ascending") {
   const header = page.locator(`th:has(button[aria-label="Sort by ${label}"])`);
   await header.waitFor({ state: "visible" });
   await button.click();
+  await page.waitForFunction(
+    ({ label: expectedLabel, direction: expectedDirection }) => [...document.querySelectorAll("th")].some((candidate) => (
+      candidate.getAttribute("aria-sort") === expectedDirection
+      && candidate.querySelector("button")?.getAttribute("aria-label") === `Sort by ${expectedLabel}`
+    )),
+    { label, direction },
+    { timeout: timeoutMs },
+  );
+  return header;
+}
+
+async function sortByWithKeyboard(page, label, direction = "ascending") {
+  const button = page.getByRole("button", { name: `Sort by ${label}`, exact: true });
+  const header = page.locator(`th:has(button[aria-label="Sort by ${label}"])`);
+  await header.waitFor({ state: "visible" });
+  await button.focus();
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.getAttribute("aria-label")),
+    `Sort by ${label}`,
+  );
+  await button.press("Enter");
   await page.waitForFunction(
     ({ label: expectedLabel, direction: expectedDirection }) => [...document.querySelectorAll("th")].some((candidate) => (
       candidate.getAttribute("aria-sort") === expectedDirection
@@ -503,6 +611,104 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
         "Failed",
         "Converted",
       ]);
+    });
+  });
+
+  await t.test("diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions", async () => {
+    const arrowDiagnostics = await runConvertedDimensionDiagnostic(
+      "dimension-arrow-down-enter",
+      async ({ page }) => {
+        await page.keyboard.press("ArrowDown");
+        await page.keyboard.press("Enter");
+      },
+    );
+    const typeaheadDiagnostics = await runConvertedDimensionDiagnostic(
+      "dimension-typeahead-ar",
+      async ({ page }) => {
+        await page.keyboard.type("ar");
+        await page.keyboard.press("Enter");
+      },
+    );
+    const controlDiagnostics = await runConvertedDimensionDiagnostic(
+      "dimension-select-option-control",
+      async ({ dimension }) => {
+        await dimension.selectOption("artist");
+      },
+    );
+
+    assert.equal(controlDiagnostics.dimensionValue, "artist", JSON.stringify(controlDiagnostics));
+    assert.deepEqual(controlDiagnostics.conditionalControl, {
+      present: true,
+      id: "converted-value",
+      label: "Artist",
+    });
+    assert.ok(arrowDiagnostics.focusedElement, JSON.stringify(arrowDiagnostics));
+    assert.ok(typeaheadDiagnostics.focusedElement, JSON.stringify(typeaheadDiagnostics));
+  });
+
+  await t.test("preserves keyboard traversal and Search recovery after controlled Artist setup", async () => {
+    await withElectronLaunch("keyboard-navigation-and-search", async ({ page }) => {
+      const resultRows = await openConvertedWithKeyboard(page);
+      const dimension = page.getByLabel("Filter by", { exact: true });
+
+      const artist = await selectConvertedDimension(page, "Artist");
+      assert.equal(await dimension.inputValue(), "artist");
+      await dimension.focus();
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "converted-dimension");
+
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "converted-value");
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "converted-dimension");
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "converted-value");
+      await artist.selectOption({ label: "Alpha Collaborator" });
+      await assertSelectedLabel(artist, "Alpha Collaborator");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Alpha Other"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "converted-value");
+
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "search");
+      await page.keyboard.type("no such track");
+      await assertConvertedResults(page, resultRows, []);
+
+      const resultStatus = page.getByRole("status");
+      assert.equal(await resultStatus.getAttribute("aria-atomic"), "true");
+      assert.equal(await resultStatus.getAttribute("aria-controls"), "queue-results");
+      assert.equal(await page.locator("#app").getAttribute("aria-live"), null);
+
+      const clearSearch = page.getByRole("button", { name: "Clear Search", exact: true });
+      await clearSearch.focus();
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "clear-search");
+      await clearSearch.press("Enter");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Alpha Other"]);
+      assert.equal(await page.getByLabel("Search", { exact: true }).inputValue(), "");
+      await assertSelectedLabel(page.getByLabel("Artist", { exact: true }), "Alpha Collaborator");
+    });
+  });
+
+  await t.test("supports keyboard sorting and clear-sort recovery without changing selection", async () => {
+    await withElectronLaunch("keyboard-sorting-and-clear", async ({ page }) => {
+      const resultRows = await openConvertedWithKeyboard(page);
+      const dimension = page.getByLabel("Filter by", { exact: true });
+
+      const artist = await selectConvertedDimension(page, "Artist");
+      await artist.selectOption({ label: "Alpha Collaborator" });
+      await assertSelectedLabel(artist, "Alpha Collaborator");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Alpha Other"]);
+
+      const titleHeader = await sortByWithKeyboard(page, "Title", "ascending");
+      await assertConvertedResults(page, resultRows, ["Alpha Other", "Shared Lead"]);
+      assert.equal(await titleHeader.getAttribute("aria-sort"), "ascending");
+
+      const clearSortButton = page.getByRole("button", { name: "Clear sort", exact: true });
+      await clearSortButton.focus();
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "clear-sort");
+      await clearSortButton.press("Enter");
+      await assertConvertedResults(page, resultRows, ["Shared Lead", "Alpha Other"]);
+      assert.equal(await page.getByRole("button", { name: "Clear sort", exact: true }).count(), 0);
+      await assertSelectedLabel(page.getByLabel("Artist", { exact: true }), "Alpha Collaborator");
+      assert.equal(await page.locator("#app").getAttribute("aria-live"), null);
     });
   });
 });
