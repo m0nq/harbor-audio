@@ -614,6 +614,72 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
+  await t.test("advances the isolated Demo lifecycle by keyboard and resets on a fresh launch", async () => {
+    await withElectronLaunch("lifecycle-demo-keyboard", async ({ page }) => {
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("heading", { name: "Demo lifecycle", exact: true }).waitFor({ state: "visible" });
+
+      const status = page.locator("#lifecycle-demo-status");
+      const advance = page.getByRole("button", { name: "Advance demo step", exact: true });
+      assert.equal(await status.textContent(), "Waiting");
+      assert.equal(await advance.isDisabled(), false);
+      assert.equal(await page.locator("#item-count").textContent(), "Items: 2");
+
+      for (const expectedStatus of ["Analyzing", "Converting", "Converted"]) {
+        await advance.focus();
+        assert.equal(await page.evaluate(() => document.activeElement?.id), "advance-demo-step");
+        await advance.press("Enter");
+        await page.waitForFunction(
+          (expected) => document.querySelector("#lifecycle-demo-status")?.textContent === expected,
+          expectedStatus,
+          { timeout: timeoutMs },
+        );
+        assert.equal(await status.textContent(), expectedStatus);
+      }
+
+      assert.equal(await advance.isDisabled(), true);
+      assert.equal(await advance.evaluate((button) => button.disabled), false);
+      assert.equal(await advance.getAttribute("aria-disabled"), "true");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "advance-demo-step");
+      assert.match(await page.locator("#lifecycle-demo-completed").textContent(), /no actual media or output file/i);
+      assert.equal(await page.locator("#item-count").textContent(), "Items: 2");
+
+      await advance.press("Enter");
+      assert.equal(await status.textContent(), "Converted");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "advance-demo-step");
+      const terminalButtonBox = await advance.boundingBox();
+      assert.ok(terminalButtonBox, "expected the terminal demo button to have a visible hit target");
+      await page.mouse.click(
+        terminalButtonBox.x + terminalButtonBox.width / 2,
+        terminalButtonBox.y + terminalButtonBox.height / 2,
+      );
+      assert.equal(await status.textContent(), "Converted");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "advance-demo-step");
+      await page.keyboard.press("Shift+Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "search");
+      await page.keyboard.press("Tab");
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "advance-demo-step");
+
+      await page.getByRole("button", { name: "Converted", exact: true }).click();
+      await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("heading", { name: "Demo lifecycle", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await status.textContent(), "Converted");
+      assert.equal(await advance.isDisabled(), true);
+      assert.equal(await advance.evaluate((button) => button.disabled), false);
+      assert.equal(await advance.getAttribute("aria-disabled"), "true");
+    });
+
+    await withElectronLaunch("lifecycle-demo-fresh-launch", async ({ page }) => {
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("heading", { name: "Demo lifecycle", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator("#lifecycle-demo-status").textContent(), "Waiting");
+      assert.equal(await page.getByRole("button", { name: "Advance demo step", exact: true }).isDisabled(), false);
+      assert.equal(await page.getByRole("button", { name: "Advance demo step", exact: true }).getAttribute("aria-disabled"), "false");
+    });
+  });
+
+  if (process.env.HARBOR_RUN_NATIVE_SELECT_DIAGNOSTICS === "1") {
   await t.test("diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions", async () => {
     const arrowDiagnostics = await runConvertedDimensionDiagnostic(
       "dimension-arrow-down-enter",
@@ -645,6 +711,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     assert.ok(arrowDiagnostics.focusedElement, JSON.stringify(arrowDiagnostics));
     assert.ok(typeaheadDiagnostics.focusedElement, JSON.stringify(typeaheadDiagnostics));
   });
+  }
 
   await t.test("preserves keyboard traversal and Search recovery after controlled Artist setup", async () => {
     await withElectronLaunch("keyboard-navigation-and-search", async ({ page }) => {

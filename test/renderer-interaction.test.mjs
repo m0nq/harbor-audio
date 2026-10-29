@@ -374,6 +374,82 @@ test("compiled renderer interaction suite", async (t) => {
     }
   });
 
+  await t.test("runs the isolated Demo lifecycle without changing canonical queue behavior", async () => {
+    const harness = await createRendererDom("lifecycle-demo");
+
+    try {
+      const document = documentFor(harness);
+      await clickView(harness, "converting");
+
+      const demo = document.querySelector('[aria-labelledby="lifecycle-demo-heading"]');
+      assert.ok(demo);
+      assert.equal(demo.querySelector("h2")?.textContent, "Demo lifecycle");
+      assert.equal(demo.querySelector("#lifecycle-demo-status")?.textContent, "Waiting");
+      assert.equal(demo.querySelector("#advance-demo-step")?.textContent, "Advance demo step");
+      assert.equal(demo.querySelector("#advance-demo-step")?.disabled, false);
+      assert.equal(demo.querySelector("#advance-demo-step")?.getAttribute("aria-disabled"), "false");
+      assert.match(demo.textContent, /no actual media or output file is produced/i);
+      assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
+
+      await setFilter(harness, "failed");
+      await setSearch(harness, "blue");
+      assert.deepEqual(queueTitles(document), ["Blue Hour"]);
+      assert.equal(demo.querySelector("#lifecycle-demo-status")?.textContent, "Waiting");
+      assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
+
+      await setSearch(harness, "");
+      await setFilter(harness, "all");
+      for (const expectedStatus of ["Analyzing", "Converting", "Converted"]) {
+        const advance = document.querySelector("#advance-demo-step");
+        assert.ok(advance);
+        advance.focus();
+        assert.strictEqual(document.activeElement, advance);
+        advance.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
+        await settleRenderer();
+        assert.equal(document.querySelector("#lifecycle-demo-status")?.textContent, expectedStatus);
+      }
+
+      const completed = document.querySelector("#lifecycle-demo-status");
+      const completedButton = document.querySelector("#advance-demo-step");
+      assert.equal(completed?.getAttribute("tabindex"), null);
+      assert.equal(completedButton?.disabled, false);
+      assert.equal(completedButton?.getAttribute("aria-disabled"), "true");
+      assert.strictEqual(document.activeElement, completedButton);
+      assert.match(document.querySelector('[data-lifecycle-state="converted"]')?.textContent, /Lifecycle Demo Track/);
+      assert.match(document.querySelector('[aria-labelledby="lifecycle-demo-heading"]')?.textContent, /completed demonstration/i);
+
+      completedButton.dispatchEvent(new harness.dom.window.MouseEvent("click", { bubbles: true }));
+      await settleRenderer();
+      assert.equal(document.querySelector("#lifecycle-demo-status")?.textContent, "Converted");
+      assert.strictEqual(document.activeElement, document.querySelector("#advance-demo-step"));
+
+      await clickView(harness, "converted");
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
+      await clickView(harness, "converting");
+      assert.equal(document.querySelector("#lifecycle-demo-status")?.textContent, "Converted");
+      assert.equal(document.querySelector("#advance-demo-step")?.getAttribute("aria-disabled"), "true");
+      assert.equal(document.querySelector("#advance-demo-step")?.disabled, false);
+      assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
+    }
+
+    const freshHarness = await createRendererDom("lifecycle-demo-fresh");
+    try {
+      const document = documentFor(freshHarness);
+      await clickView(freshHarness, "converting");
+      assert.equal(document.querySelector("#lifecycle-demo-status")?.textContent, "Waiting");
+      assert.equal(document.querySelector("#advance-demo-step")?.disabled, false);
+      assert.equal(document.querySelector("#advance-demo-step")?.getAttribute("aria-disabled"), "false");
+      assertRuntimeBoundaries(freshHarness);
+    } finally {
+      freshHarness.dispose();
+    }
+  });
+
   await t.test("preserves Search and Converted selections independently across navigation", async () => {
     const harness = await createRendererDom("view-switch");
 

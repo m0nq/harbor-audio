@@ -18,6 +18,11 @@ import {
 } from "../domain/workflow.js";
 import { projectConvertedFilter } from "../domain/converted-filter.js";
 import { sortConvertedItems } from "../domain/converted-sort.js";
+import {
+  advanceLifecycleDemo,
+  createLifecycleDemoState,
+  type LifecycleDemoState,
+} from "../domain/lifecycle-demo.js";
 import { convertedViewDemoItems } from "../fixtures/converted-filter-fixtures.js";
 
 declare global {
@@ -39,6 +44,7 @@ let activeView: FixtureView = "browser";
 let query: QueueQuery = { filter: "all", search: "" };
 let convertedSelection: ConvertedFilterSelection = { dimension: "all", value: "all" };
 let convertedSort: ConvertedSortState | null = null;
+let lifecycleDemoState: LifecycleDemoState = createLifecycleDemoState();
 
 const optionCollator = new Intl.Collator("en-US", { sensitivity: "base", numeric: false });
 
@@ -117,7 +123,26 @@ function renderConvertingQueue(projection: FixtureQueueProjection): string {
       <div id="queue-results">${renderConvertingResults(items)}</div>
       <div class="unknown-note">Retry and cancellation affordances are unknown in the captured workflow. No action controls are exposed in fixture mode.</div>
     </section>
+    ${renderLifecycleDemo()}
     <div class="footer-line"><span id="item-count">Items: ${items.length}</span><span>Output policy: ${snapshot?.outputPolicy.directory.state === "observed" ? "fixture-output" : "unknown"}</span></div>
+  `;
+}
+
+function renderLifecycleDemo(): string {
+  const { record, status } = lifecycleDemoState;
+  const isComplete = status === "converted";
+  const statusLabel = status[0].toUpperCase() + status.slice(1);
+
+  return `
+    <section class="queue-card lifecycle-demo" aria-labelledby="lifecycle-demo-heading">
+      <div class="section-heading"><div><h2 id="lifecycle-demo-heading">Demo lifecycle</h2><p>A deterministic fixture-only conversion demonstration.</p></div><span class="fixture-badge">no media</span></div>
+      <div class="lifecycle-demo-row" data-lifecycle-state="${status}">
+        <div><strong>${escapeHtml(record.title)}</strong><span>${escapeHtml(record.creator)} · ${escapeHtml(record.collection)} · ${escapeHtml(record.duration)}</span></div>
+        <span id="lifecycle-demo-status" role="status" aria-live="polite" aria-atomic="true">${statusLabel}</span>
+        <button id="advance-demo-step" type="button" aria-disabled="${isComplete ? "true" : "false"}">Advance demo step</button>
+      </div>
+      ${isComplete ? `<p id="lifecycle-demo-completed">Completed demonstration result remains visible; no actual media or output file is produced.</p>` : `<p id="lifecycle-demo-description">This demonstration changes fixture state only; no actual media or output file is produced.</p>`}
+    </section>
   `;
 }
 
@@ -271,6 +296,15 @@ function wireEvents(): void {
       query = { ...query, filter: "all" };
       renderShell();
     });
+  });
+
+  document.querySelector<HTMLButtonElement>("#advance-demo-step")?.addEventListener("click", () => {
+    if (lifecycleDemoState.status === "converted") return;
+
+    lifecycleDemoState = advanceLifecycleDemo(lifecycleDemoState);
+    renderShell();
+
+    document.querySelector<HTMLButtonElement>("#advance-demo-step")?.focus();
   });
 
   document.querySelector<HTMLSelectElement>("#filter")?.addEventListener("change", (event) => {
