@@ -1,4 +1,5 @@
 import type { QueueItem, SourceItem } from "./contracts.js";
+import { nextConversionStatus } from "./conversion-status.js";
 
 export type SessionQueueItem = Readonly<QueueItem>;
 
@@ -30,6 +31,28 @@ export interface InsertSessionQueueItemInput {
   readonly canonicalQueueItems: readonly QueueItem[];
   readonly sourceItemId: string;
 }
+
+export interface AdvanceSessionQueueItemInput {
+  readonly state: SessionQueueState;
+  readonly sessionQueueItemId: string;
+}
+
+export type SessionQueueAdvanceResult =
+  | {
+      readonly kind: "advanced";
+      readonly item: SessionQueueItem;
+      readonly state: SessionQueueState;
+    }
+  | {
+      readonly kind: "unknown-id";
+      readonly sessionQueueItemId: string;
+      readonly state: SessionQueueState;
+    }
+  | {
+      readonly kind: "terminal";
+      readonly item: SessionQueueItem;
+      readonly state: SessionQueueState;
+    };
 
 function createState(items: readonly SessionQueueItem[], nextInsertionOrdinal: number): SessionQueueState {
   return Object.freeze({
@@ -86,6 +109,33 @@ export function insertSessionQueueItem(
     kind: "added",
     item,
     state: createState([...state.items, item], ordinal + 1),
+  };
+}
+
+export function advanceSessionQueueItem(
+  input: AdvanceSessionQueueItemInput,
+): SessionQueueAdvanceResult {
+  const { state, sessionQueueItemId } = input;
+  const itemIndex = state.items.findIndex((item) => item.id === sessionQueueItemId);
+
+  if (itemIndex < 0) {
+    return { kind: "unknown-id", sessionQueueItemId, state };
+  }
+
+  const item = state.items[itemIndex];
+  const nextStatus = nextConversionStatus(item.status);
+  if (!nextStatus) {
+    return { kind: "terminal", item, state };
+  }
+
+  const nextItem = Object.freeze({ ...item, status: nextStatus });
+  const nextItems = [...state.items];
+  nextItems[itemIndex] = nextItem;
+
+  return {
+    kind: "advanced",
+    item: nextItem,
+    state: createState(nextItems, state.nextInsertionOrdinal),
   };
 }
 

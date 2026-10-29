@@ -1,4 +1,5 @@
 import type { ConversionStatus } from "./contracts.js";
+import { nextConversionStatus } from "./conversion-status.js";
 
 export interface LifecycleDemoRecord {
   readonly id: string;
@@ -21,12 +22,6 @@ export const lifecycleDemoRecord: LifecycleDemoRecord = Object.freeze({
   duration: "3:42",
 });
 
-const nextStatuses: Partial<Record<ConversionStatus, ConversionStatus>> = {
-  waiting: "analyzing",
-  analyzing: "converting",
-  converting: "converted",
-};
-
 export function createLifecycleDemoState(): LifecycleDemoState {
   return {
     record: lifecycleDemoRecord,
@@ -35,7 +30,7 @@ export function createLifecycleDemoState(): LifecycleDemoState {
 }
 
 export function advanceLifecycleDemo(state: LifecycleDemoState): LifecycleDemoState {
-  const nextStatus = nextStatuses[state.status];
+  const nextStatus = nextConversionStatus(state.status);
   if (!nextStatus) return state;
 
   return {

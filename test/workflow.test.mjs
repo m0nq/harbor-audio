@@ -204,6 +204,9 @@ test("fixture-only source contains no network primitives or remote URLs", async 
     "src/main.ts",
     "src/preload.ts",
     "src/domain/contracts.ts",
+    "src/domain/conversion-status.ts",
+    "src/domain/lifecycle-demo.ts",
+    "src/domain/session-queue.ts",
     "src/domain/workflow.ts",
     "src/fixtures/workflow-fixtures.ts",
     "src/fixtures/converted-filter-fixtures.ts",
@@ -213,6 +216,9 @@ test("fixture-only source contains no network primitives or remote URLs", async 
   const combined = source.join("\n");
   assert.doesNotMatch(combined, /\b(fetch|XMLHttpRequest|WebSocket)\s*\(/);
   assert.doesNotMatch(combined, /https?:\/\//);
+  assert.doesNotMatch(combined, /\b(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|mkdir|mkdirSync)\s*\(/);
+  assert.doesNotMatch(combined, /\b(localStorage|sessionStorage|indexedDB|AudioContext|MediaSource)\b/);
+  assert.doesNotMatch(combined, /from ["']node:fs["']/);
   assert.match(combined, /fixture-only/);
 });
 

@@ -18,12 +18,14 @@ import {
 } from "../domain/workflow.js";
 import { projectConvertedFilter } from "../domain/converted-filter.js";
 import { sortConvertedItems } from "../domain/converted-sort.js";
+import { nextConversionStatus } from "../domain/conversion-status.js";
 import {
   advanceLifecycleDemo,
   createLifecycleDemoState,
   type LifecycleDemoState,
 } from "../domain/lifecycle-demo.js";
 import {
+  advanceSessionQueueItem,
   createSessionQueueState,
   insertSessionQueueItem,
   type SessionQueueState,
@@ -52,6 +54,7 @@ let convertedSort: ConvertedSortState | null = null;
 let lifecycleDemoState: LifecycleDemoState = createLifecycleDemoState();
 let sessionQueueState: SessionQueueState = createSessionQueueState();
 let sessionQueueFeedback = "";
+let sessionQueueAnnouncement = "";
 
 const optionCollator = new Intl.Collator("en-US", { sensitivity: "base", numeric: false });
 
@@ -142,14 +145,38 @@ function renderConvertingQueue(projection: FixtureQueueProjection): string {
 }
 
 function renderSessionQueueAdditions(): string {
-  const items = sessionQueueState.items;
   return `
     <section class="queue-card session-queue-additions" aria-labelledby="session-queue-additions-heading">
-      <div class="section-heading"><div><h2 id="session-queue-additions-heading">Session queue additions</h2><p>Added during the current session · separate from canonical queue results</p></div><span class="fixture-badge">waiting only</span></div>
-      <p class="session-queue-note">These fixture records begin at Waiting, do not start converting automatically, and do not produce media output.</p>
-      ${items.length === 0 ? `<div class="empty">No session queue items have been added.</div>` : `<table class="queue-table"><caption class="visually-hidden">Session queue additions</caption><thead><tr><th scope="col">Title</th><th scope="col">Creator</th><th scope="col">Collection</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td><td><span class="status waiting">Waiting</span></td></tr>`).join("")}</tbody></table>`}
+      <div class="section-heading"><div><h2 id="session-queue-additions-heading">Session queue additions</h2><p>Added during the current session · separate from canonical queue results</p></div><span class="fixture-badge">session only</span></div>
+      <p class="session-queue-note">These fixture records begin at Waiting and advance only by explicit action. Completed items remain here; no media output is created.</p>
+      <p id="session-queue-announcement" class="session-queue-announcement" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(sessionQueueAnnouncement)}</p>
+      <div id="session-queue-results">${renderSessionQueueResults()}</div>
     </section>
   `;
+}
+
+function renderSessionQueueResults(): string {
+  const items = sessionQueueState.items;
+  if (items.length === 0) return `<div class="empty">No session queue items have been added.</div>`;
+
+  return `<table class="queue-table"><caption class="visually-hidden">Session queue additions</caption><thead><tr><th scope="col">Title</th><th scope="col">Creator</th><th scope="col">Collection</th><th scope="col">Duration</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>${items.map((item) => renderSessionQueueRow(item)).join("")}</tbody></table>`;
+}
+
+function renderSessionQueueRow(item: SessionQueueState["items"][number]): string {
+  const statusLabel = formatStatusLabel(item.status);
+  const isTerminal = nextConversionStatus(item.status) === undefined;
+  const actionLabel = isTerminal
+    ? item.status === "converted"
+      ? `${item.title} is already Converted (simulated complete)`
+      : `${item.title} is already ${statusLabel} (simulated terminal state)`
+    : `Advance ${item.title} from ${statusLabel} (simulated)`;
+  const actionText = isTerminal ? item.status === "converted" ? "Completed" : "Terminal" : "Advance";
+
+  return `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td><td><span class="status ${item.status}">${statusLabel}</span></td><td><button class="session-queue-advance" type="button" data-session-queue-id="${escapeHtml(item.id)}" aria-label="${escapeHtml(actionLabel)}" aria-disabled="${isTerminal ? "true" : "false"}">${actionText}</button></td></tr>`;
+}
+
+function formatStatusLabel(status: QueueItem["status"]): string {
+  return status[0].toUpperCase() + status.slice(1);
 }
 
 function renderLifecycleDemo(): string {
@@ -381,6 +408,7 @@ function wireEvents(): void {
 
   wireSecondaryControl();
   wireSortControls();
+  wireSessionQueueControls();
 
   document.querySelector<HTMLInputElement>("#search")?.addEventListener("input", (event) => {
     query.search = (event.target as HTMLInputElement).value;
@@ -433,6 +461,37 @@ function wireSecondaryControl(): void {
     updateConvertedResults();
     wireClearSearch();
   });
+}
+
+function wireSessionQueueControls(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-session-queue-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sessionQueueItemId = button.dataset.sessionQueueId;
+      if (!sessionQueueItemId) return;
+
+      const result = advanceSessionQueueItem({ state: sessionQueueState, sessionQueueItemId });
+      if (result.kind === "unknown-id" || result.kind === "terminal") return;
+
+      sessionQueueState = result.state;
+      sessionQueueAnnouncement = `${result.item.title} is now ${formatStatusLabel(result.item.status)} in the simulated session queue; no media output was created.`;
+      updateSessionQueueResults();
+
+      [...document.querySelectorAll<HTMLButtonElement>("[data-session-queue-id]")]
+        .find((nextButton) => nextButton.dataset.sessionQueueId === sessionQueueItemId)
+        ?.focus();
+    });
+  });
+}
+
+function updateSessionQueueResults(): void {
+  const results = document.querySelector<HTMLDivElement>("#session-queue-results");
+  if (results) {
+    results.innerHTML = renderSessionQueueResults();
+    wireSessionQueueControls();
+  }
+
+  const announcement = document.querySelector<HTMLParagraphElement>("#session-queue-announcement");
+  if (announcement) announcement.textContent = sessionQueueAnnouncement;
 }
 
 function renderSecondaryControlInPlace(): void {

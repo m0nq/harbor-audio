@@ -673,6 +673,77 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
+  await t.test("advances session items once per native keypress and keeps terminal items inert", async () => {
+    await withElectronLaunch("session-queue-lifecycle", async ({ page }) => {
+      const session = page.locator('section[aria-labelledby="session-queue-additions-heading"]');
+      await page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true }).press("Enter");
+      await page.getByRole("button", { name: "Add Blue Hour to session queue", exact: true }).press("Space");
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await session.waitFor({ state: "visible" });
+
+      const auroraId = "session-queue:source-aurora:1";
+      const blueId = "session-queue:source-blue-hour:2";
+      const statusTexts = () => session.locator(".status").allTextContents();
+      const activeAurora = (status) => session.getByRole("button", {
+        name: `Advance Aurora Lines from ${status} (simulated)`,
+        exact: true,
+      });
+
+      let aurora = activeAurora("Waiting");
+      await aurora.focus();
+      await aurora.press("Enter");
+      assert.deepEqual(await statusTexts(), ["Analyzing", "Waiting"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), auroraId);
+      assert.match(await session.locator("#session-queue-announcement").textContent(), /Aurora Lines.*Analyzing.*simulated.*no media output/i);
+
+      aurora = activeAurora("Analyzing");
+      await aurora.press("Space");
+      assert.deepEqual(await statusTexts(), ["Converting", "Waiting"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), auroraId);
+
+      aurora = activeAurora("Converting");
+      await aurora.press("Enter");
+      assert.deepEqual(await statusTexts(), ["Converted", "Waiting"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), auroraId);
+
+      const terminal = session.getByRole("button", {
+        name: "Aurora Lines is already Converted (simulated complete)",
+        exact: true,
+      });
+      assert.equal(await terminal.textContent(), "Completed");
+      assert.equal(await terminal.getAttribute("aria-disabled"), "true");
+      assert.equal(await terminal.evaluate((button) => button.disabled), false);
+      await terminal.focus();
+      await terminal.press("Space");
+      assert.deepEqual(await statusTexts(), ["Converted", "Waiting"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), auroraId);
+
+      const blue = session.getByRole("button", {
+        name: "Advance Blue Hour from Waiting (simulated)",
+        exact: true,
+      });
+      await blue.press("Enter");
+      assert.deepEqual(await statusTexts(), ["Converted", "Analyzing"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), blueId);
+      assert.equal(await page.locator(convertedRowsSelector).count(), 0);
+      assert.match(await session.textContent(), /no media output/i);
+
+      await page.getByRole("button", { name: "Converted", exact: true }).click();
+      await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator(convertedRowsSelector).count(), 5);
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await session.waitFor({ state: "visible" });
+      assert.deepEqual(await statusTexts(), ["Converted", "Analyzing"]);
+    });
+
+    await withElectronLaunch("session-queue-lifecycle-fresh", async ({ page }) => {
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("heading", { name: "Session queue additions", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator(sessionQueueRowsSelector).count(), 0);
+      assert.equal(await page.locator(canonicalConvertingRowsSelector).count(), 2);
+    });
+  });
+
   await t.test("advances the isolated Demo lifecycle by keyboard and resets on a fresh launch", async () => {
     await withElectronLaunch("lifecycle-demo-keyboard", async ({ page }) => {
       await page.getByRole("button", { name: "Converting", exact: true }).click();

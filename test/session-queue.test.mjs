@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  advanceSessionQueueItem,
   createSessionQueueState,
   insertSessionQueueItem,
   resetSessionQueue,
@@ -15,6 +16,10 @@ function insert(state, sourceItemId, snapshot = fixtureSnapshot) {
     canonicalQueueItems: snapshot.queueItems,
     sourceItemId,
   });
+}
+
+function advance(state, sessionQueueItemId) {
+  return advanceSessionQueueItem({ state, sessionQueueItemId });
 }
 
 test("adds one existing source as an immutable waiting queue record", () => {
@@ -120,4 +125,99 @@ test("resets session membership without touching canonical or lifecycle fixtures
     "queue-blue-hour",
     "queue-lantern",
   ]);
+});
+
+test("advances one session item through the shared lifecycle one step at a time", () => {
+  const added = insert(createSessionQueueState(), "source-aurora");
+  assert.equal(added.kind, "added");
+
+  let state = added.state;
+  const statuses = [state.items[0].status];
+  for (const expectedStatus of ["analyzing", "converting", "converted"]) {
+    const result = advance(state, state.items[0].id);
+    assert.equal(result.kind, "advanced");
+    state = result.state;
+    statuses.push(result.item.status);
+    assert.equal(result.item.status, expectedStatus);
+  }
+
+  assert.deepEqual(statuses, ["waiting", "analyzing", "converting", "converted"]);
+  assert.equal(state.nextInsertionOrdinal, 2);
+});
+
+test("unknown IDs and terminal statuses return without mutation", () => {
+  const added = insert(createSessionQueueState(), "source-aurora");
+  assert.equal(added.kind, "added");
+
+  const unknown = advance(added.state, "session-queue:missing:1");
+  assert.equal(unknown.kind, "unknown-id");
+  assert.strictEqual(unknown.state, added.state);
+
+  let convertedState = added.state;
+  for (let index = 0; index < 3; index += 1) {
+    const result = advance(convertedState, convertedState.items[0].id);
+    assert.equal(result.kind, "advanced");
+    convertedState = result.state;
+  }
+
+  const converted = advance(convertedState, convertedState.items[0].id);
+  assert.equal(converted.kind, "terminal");
+  assert.strictEqual(converted.state, convertedState);
+  assert.strictEqual(converted.item, convertedState.items[0]);
+
+  const failedState = Object.freeze({
+    items: Object.freeze([Object.freeze({ ...convertedState.items[0], status: "failed" })]),
+    nextInsertionOrdinal: convertedState.nextInsertionOrdinal,
+  });
+  const failed = advance(failedState, failedState.items[0].id);
+  assert.equal(failed.kind, "terminal");
+  assert.strictEqual(failed.state, failedState);
+  assert.strictEqual(failed.item, failedState.items[0]);
+});
+
+test("advancement changes only the target and preserves identity, metadata, order, and ordinal", () => {
+  let state = createSessionQueueState();
+  const first = insert(state, "source-aurora");
+  assert.equal(first.kind, "added");
+  state = first.state;
+  const second = insert(state, "source-blue-hour");
+  assert.equal(second.kind, "added");
+  state = second.state;
+
+  const beforeItems = [...state.items];
+  const beforeTarget = beforeItems[1];
+  const result = advance(state, beforeTarget.id);
+
+  assert.equal(result.kind, "advanced");
+  assert.notStrictEqual(result.state, state);
+  assert.strictEqual(result.state.items[0], beforeItems[0]);
+  assert.notStrictEqual(result.state.items[1], beforeTarget);
+  assert.equal(result.item.id, beforeTarget.id);
+  assert.equal(result.item.sourceItemId, beforeTarget.sourceItemId);
+  assert.equal(result.item.title, beforeTarget.title);
+  assert.equal(result.item.creator, beforeTarget.creator);
+  assert.equal(result.item.collection, beforeTarget.collection);
+  assert.equal(result.item.duration, beforeTarget.duration);
+  assert.deepEqual(result.state.items.map((item) => item.id), beforeItems.map((item) => item.id));
+  assert.equal(result.state.nextInsertionOrdinal, state.nextInsertionOrdinal);
+  assert.deepEqual(state.items, beforeItems);
+});
+
+test("duplicate prevention remains stable after a session item reaches Converted", () => {
+  const added = insert(createSessionQueueState(), "source-aurora");
+  assert.equal(added.kind, "added");
+
+  let state = added.state;
+  for (let index = 0; index < 3; index += 1) {
+    const result = advance(state, state.items[0].id);
+    assert.equal(result.kind, "advanced");
+    state = result.state;
+  }
+
+  const duplicate = insert(state, "source-aurora");
+  assert.equal(duplicate.kind, "already-present");
+  assert.strictEqual(duplicate.state, state);
+  assert.strictEqual(duplicate.item, state.items[0]);
+  assert.equal(state.items[0].status, "converted");
+  assert.equal(state.nextInsertionOrdinal, 2);
 });

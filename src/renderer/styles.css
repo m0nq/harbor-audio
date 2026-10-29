@@ -58,7 +58,10 @@ h1 { margin: 8px 0 7px; font-size: 30px; letter-spacing: -0.035em; }
 .source-add-button { padding: 7px 9px; border: 1px solid rgba(230, 120, 93, 0.45); border-radius: 8px; color: #fff; background: var(--accent-soft); font-size: 11px; }
 .source-add-button:hover { background: rgba(230, 120, 93, 0.28); }
 .session-queue-added { color: var(--success) !important; font-weight: 700; }
-.session-queue-feedback { min-height: 17px; margin: 14px 0 0; color: var(--success); font-size: 11px; }
+.session-queue-advance { padding: 7px 9px; border: 1px solid rgba(230, 120, 93, 0.45); border-radius: 8px; color: #fff; background: var(--accent-soft); font-size: 11px; }
+.session-queue-advance:hover { background: rgba(230, 120, 93, 0.28); }
+.session-queue-advance[aria-disabled="true"] { cursor: default; opacity: 0.55; }
+.session-queue-feedback, .session-queue-announcement { min-height: 17px; margin: 14px 0 0; color: var(--success); font-size: 11px; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; margin: 30px 0 14px; }
 .section-heading h2 { margin: 0; font-size: 16px; }
 .section-heading p { margin: 0; color: var(--ink-muted); font-size: 12px; }

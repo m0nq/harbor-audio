@@ -132,6 +132,15 @@ function sessionQueueTitles(document) {
     .map((element) => element.textContent);
 }
 
+function sessionQueueStatuses(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="session-queue-additions-heading"] tbody .status')]
+    .map((element) => element.textContent);
+}
+
+function sessionQueueActions(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="session-queue-additions-heading"] [data-session-queue-id]')];
+}
+
 function queueSummary(document) {
   const queueHeading = [...document.querySelectorAll("h2")]
     .find((element) => element.textContent === "Converting" || element.textContent === "Converted");
@@ -365,6 +374,87 @@ test("compiled renderer interaction suite", async (t) => {
       await clickView(freshHarness, "converting");
       assert.deepEqual(sessionQueueTitles(document), []);
       assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assertRuntimeBoundaries(freshHarness);
+    } finally {
+      freshHarness.dispose();
+    }
+  });
+
+  await t.test("advances targeted session items with stable announcements, labels, focus, and terminal no-op behavior", async () => {
+    const harness = await createRendererDom("session-queue-lifecycle");
+
+    try {
+      const document = documentFor(harness);
+      document.querySelector('[data-source-id="source-aurora"]').click();
+      document.querySelector('[data-source-id="source-blue-hour"]').click();
+      await clickView(harness, "converting");
+
+      const results = document.querySelector("#session-queue-results");
+      const announcement = document.querySelector("#session-queue-announcement");
+      assert.ok(results);
+      assert.ok(announcement);
+      assert.equal(announcement.getAttribute("role"), "status");
+      assert.equal(announcement.getAttribute("aria-live"), "polite");
+      assert.deepEqual(sessionQueueStatuses(document), ["Waiting", "Waiting"]);
+      assert.deepEqual(sessionQueueActions(document).map((button) => button.getAttribute("aria-label")), [
+        "Advance Aurora Lines from Waiting (simulated)",
+        "Advance Blue Hour from Waiting (simulated)",
+      ]);
+
+      const auroraAction = sessionQueueActions(document)[0];
+      auroraAction.focus();
+      auroraAction.click();
+      await settleRenderer();
+
+      assert.deepEqual(sessionQueueStatuses(document), ["Analyzing", "Waiting"]);
+      assert.deepEqual(sessionQueueActions(document).map((button) => button.getAttribute("aria-label")), [
+        "Advance Aurora Lines from Analyzing (simulated)",
+        "Advance Blue Hour from Waiting (simulated)",
+      ]);
+      assert.strictEqual(document.querySelector("#session-queue-results"), results);
+      assert.strictEqual(document.querySelector("#session-queue-announcement"), announcement);
+      assert.match(announcement.textContent, /Aurora Lines.*Analyzing.*simulated.*no media output/i);
+      assert.equal(document.activeElement?.getAttribute("data-session-queue-id"), "session-queue:source-aurora:1");
+      assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
+
+      for (const expectedStatus of ["Converting", "Converted"]) {
+        const action = sessionQueueActions(document)[0];
+        action.focus();
+        action.click();
+        await settleRenderer();
+        assert.equal(sessionQueueStatuses(document)[0], expectedStatus);
+        assert.equal(document.activeElement?.getAttribute("data-session-queue-id"), "session-queue:source-aurora:1");
+      }
+
+      const terminal = sessionQueueActions(document)[0];
+      assert.equal(terminal.textContent, "Completed");
+      assert.equal(terminal.getAttribute("aria-disabled"), "true");
+      assert.equal(terminal.disabled, false);
+      const terminalAnnouncement = announcement.textContent;
+      terminal.focus();
+      terminal.click();
+      await settleRenderer();
+      assert.deepEqual(sessionQueueStatuses(document), ["Converted", "Waiting"]);
+      assert.strictEqual(document.activeElement, terminal);
+      assert.equal(announcement.textContent, terminalAnnouncement);
+
+      await clickView(harness, "browser");
+      document.querySelector('[data-source-id="source-aurora"]').click();
+      await settleRenderer();
+      assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Already in session queue");
+      await clickView(harness, "converting");
+      assert.deepEqual(sessionQueueStatuses(document), ["Converted", "Waiting"]);
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
+    }
+
+    const freshHarness = await createRendererDom("session-queue-lifecycle-fresh");
+    try {
+      const document = documentFor(freshHarness);
+      await clickView(freshHarness, "converting");
+      assert.deepEqual(sessionQueueTitles(document), []);
       assertRuntimeBoundaries(freshHarness);
     } finally {
       freshHarness.dispose();
