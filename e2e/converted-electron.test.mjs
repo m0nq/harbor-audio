@@ -19,6 +19,10 @@ const expectedTitles = ["Shared Lead", "Alpha Other"];
 const timeoutMs = 15_000;
 const convertedRowsSelector =
   'section[aria-label="Converted demonstration fixture list"] tbody tr';
+const canonicalConvertingRowsSelector =
+  'section[aria-label="Converting fixture list"] tbody tr';
+const sessionQueueRowsSelector =
+  'section[aria-labelledby="session-queue-additions-heading"] tbody tr';
 
 function isolatedEnvironment() {
   const environment = Object.fromEntries(
@@ -611,6 +615,61 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
         "Failed",
         "Converted",
       ]);
+    });
+  });
+
+  await t.test("adds Browser sources to the isolated session queue by keyboard and resets on a fresh launch", async () => {
+    await withElectronLaunch("browser-session-queue", async ({ page }) => {
+      const aurora = page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true });
+      const blueHour = page.getByRole("button", { name: "Add Blue Hour to session queue", exact: true });
+      await aurora.focus();
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-source-id")), "source-aurora");
+      await aurora.press("Enter");
+      assert.equal(await page.locator("#session-queue-feedback").textContent(), "Added to session queue");
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-source-id")), "source-aurora");
+      assert.equal(await page.locator(".session-queue-added").count(), 1);
+
+      await blueHour.focus();
+      await blueHour.press("Space");
+      assert.equal(await page.locator("#session-queue-feedback").textContent(), "Added to session queue");
+      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-source-id")), "source-blue-hour");
+
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("heading", { name: "Session queue additions", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator(canonicalConvertingRowsSelector).count(), 2);
+      assert.equal(await page.locator(sessionQueueRowsSelector).count(), 2);
+      assert.deepEqual(await page.locator(`${sessionQueueRowsSelector} td:first-child`).allTextContents(), ["Aurora Lines", "Blue Hour"]);
+      assert.deepEqual(await page.locator(`${sessionQueueRowsSelector} .status`).allTextContents(), ["Waiting", "Waiting"]);
+      assert.equal(
+        await page.getByRole("heading", { name: "Converting", exact: true }).locator("..").locator("p").textContent(),
+        "2 fixture jobs · 1 failed · 0 converted",
+      );
+
+      await page.getByLabel("Filter items", { exact: true }).selectOption("waiting");
+      assert.equal(await page.locator(canonicalConvertingRowsSelector).count(), 0);
+      assert.equal(await page.locator(sessionQueueRowsSelector).count(), 2);
+      await page.getByPlaceholder("Search fixture library").fill("blue");
+      assert.equal(await page.locator(canonicalConvertingRowsSelector).count(), 0);
+      assert.equal(await page.locator(sessionQueueRowsSelector).count(), 2);
+
+      await page.getByPlaceholder("Search fixture library").fill("");
+      await page.getByRole("button", { name: "Converted", exact: true }).click();
+      await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator(convertedRowsSelector).count(), 5);
+
+      await page.getByRole("button", { name: "Browser", exact: true }).click();
+      const duplicate = page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true });
+      await duplicate.press("Enter");
+      assert.equal(await page.locator("#session-queue-feedback").textContent(), "Already in session queue");
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      assert.equal(await page.locator(sessionQueueRowsSelector).count(), 2);
+    });
+
+    await withElectronLaunch("browser-session-queue-fresh-launch", async ({ page }) => {
+      await page.getByRole("button", { name: "Converting", exact: true }).click();
+      await page.getByRole("heading", { name: "Session queue additions", exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator(sessionQueueRowsSelector).count(), 0);
+      assert.equal(await page.locator(canonicalConvertingRowsSelector).count(), 2);
     });
   });
 

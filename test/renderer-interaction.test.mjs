@@ -127,6 +127,11 @@ function queueTitles(document) {
     .map((element) => element.textContent);
 }
 
+function sessionQueueTitles(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="session-queue-additions-heading"] tbody tr td:first-child')]
+    .map((element) => element.textContent);
+}
+
 function queueSummary(document) {
   const queueHeading = [...document.querySelectorAll("h2")]
     .find((element) => element.textContent === "Converting" || element.textContent === "Converted");
@@ -270,6 +275,99 @@ test("compiled renderer interaction suite", async (t) => {
       assertRuntimeBoundaries(harness);
     } finally {
       harness.dispose();
+    }
+  });
+
+  await t.test("inserts Browser sources into a separate session queue with keyboard and pointer feedback", async () => {
+    const harness = await createRendererDom("browser-session-queue");
+
+    try {
+      const document = documentFor(harness);
+      const buttons = [...document.querySelectorAll(".source-add-button")];
+      assert.deepEqual(buttons.map((button) => button.getAttribute("aria-label")), [
+        "Add Aurora Lines to session queue",
+        "Add Blue Hour to session queue",
+        "Add Lantern Room to session queue",
+      ]);
+      assert.deepEqual(buttons.map((button) => button.type), ["button", "button", "button"]);
+
+      const auroraButton = buttons[0];
+      auroraButton.focus();
+      assert.strictEqual(document.activeElement, auroraButton);
+      auroraButton.dispatchEvent(new harness.dom.window.KeyboardEvent("keydown", {
+        key: "Enter",
+        bubbles: true,
+      }));
+      await settleRenderer();
+      assert.deepEqual(sessionQueueTitles(document), []);
+      assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Added to session queue");
+      assert.equal(document.querySelector("#session-queue-feedback")?.getAttribute("role"), "status");
+      assert.equal(document.querySelector("#app")?.hasAttribute("aria-live"), false);
+      assert.strictEqual(document.activeElement?.getAttribute("data-source-id"), "source-aurora");
+      assert.equal(document.querySelector('[data-source-id="source-aurora"]')?.disabled, false);
+
+      const auroraRow = [...document.querySelectorAll(".source-row")]
+        .find((row) => row.querySelector("strong")?.textContent === "Aurora Lines");
+      assert.equal(auroraRow?.querySelector(".session-queue-added")?.textContent, "Added");
+
+      const blueButton = document.querySelector('[data-source-id="source-blue-hour"]');
+      blueButton.focus();
+      blueButton.dispatchEvent(new harness.dom.window.KeyboardEvent("keydown", {
+        key: " ",
+        bubbles: true,
+      }));
+      await settleRenderer();
+      assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Added to session queue");
+      assert.strictEqual(document.activeElement?.getAttribute("data-source-id"), "source-blue-hour");
+
+      const lanternButton = document.querySelector('[data-source-id="source-lantern"]');
+      lanternButton.click();
+      await settleRenderer();
+      assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Added to session queue");
+      assert.strictEqual(document.activeElement?.getAttribute("data-source-id"), "source-lantern");
+
+      await clickView(harness, "converting");
+      assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assert.deepEqual(sessionQueueTitles(document), ["Aurora Lines", "Blue Hour", "Lantern Room"]);
+      assert.deepEqual(
+        [...document.querySelectorAll('section[aria-labelledby="session-queue-additions-heading"] tbody .status')]
+          .map((status) => status.textContent),
+        ["Waiting", "Waiting", "Waiting"],
+      );
+      assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
+
+      await setFilter(harness, "waiting");
+      assert.deepEqual(queueTitles(document), []);
+      assert.deepEqual(sessionQueueTitles(document), ["Aurora Lines", "Blue Hour", "Lantern Room"]);
+      await setSearch(harness, "blue");
+      assert.deepEqual(queueTitles(document), []);
+      assert.deepEqual(sessionQueueTitles(document), ["Aurora Lines", "Blue Hour", "Lantern Room"]);
+
+      await setSearch(harness, "");
+      await clickView(harness, "converted");
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
+      await clickView(harness, "browser");
+      const duplicateButton = document.querySelector('[data-source-id="source-aurora"]');
+      duplicateButton.click();
+      await settleRenderer();
+      assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Already in session queue");
+      await clickView(harness, "converting");
+      assert.deepEqual(sessionQueueTitles(document), ["Aurora Lines", "Blue Hour", "Lantern Room"]);
+      assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
+    }
+
+    const freshHarness = await createRendererDom("browser-session-queue-fresh");
+    try {
+      const document = documentFor(freshHarness);
+      await clickView(freshHarness, "converting");
+      assert.deepEqual(sessionQueueTitles(document), []);
+      assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
+      assertRuntimeBoundaries(freshHarness);
+    } finally {
+      freshHarness.dispose();
     }
   });
 

@@ -23,6 +23,11 @@ import {
   createLifecycleDemoState,
   type LifecycleDemoState,
 } from "../domain/lifecycle-demo.js";
+import {
+  createSessionQueueState,
+  insertSessionQueueItem,
+  type SessionQueueState,
+} from "../domain/session-queue.js";
 import { convertedViewDemoItems } from "../fixtures/converted-filter-fixtures.js";
 
 declare global {
@@ -45,6 +50,8 @@ let query: QueueQuery = { filter: "all", search: "" };
 let convertedSelection: ConvertedFilterSelection = { dimension: "all", value: "all" };
 let convertedSort: ConvertedSortState | null = null;
 let lifecycleDemoState: LifecycleDemoState = createLifecycleDemoState();
+let sessionQueueState: SessionQueueState = createSessionQueueState();
+let sessionQueueFeedback = "";
 
 const optionCollator = new Intl.Collator("en-US", { sensitivity: "base", numeric: false });
 
@@ -103,11 +110,16 @@ function renderBrowser(): string {
   return `
     <section class="browser-card" aria-label="Local browser fixture">
       <div class="browser-toolbar"><div class="traffic" aria-hidden="true"><span></span><span></span><span></span></div><div class="address">fixture://library/night-transit</div><span class="fixture-badge">offline</span></div>
-      <div class="browser-body"><div class="source-menu"><div class="selected">Library</div><div>Playlists</div><div>Collections</div><div>Recently added</div></div><div><div class="source-heading">Night Transit</div><div class="source-meta">A local playlist fixture · ${items.length} sample items</div><div class="source-list">${items.map((item) => `<div class="source-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.creator)} · ${escapeHtml(item.collection)}</span></div><span>${escapeHtml(item.duration)}</span></div>`).join("")}</div></div></div>
+      <div class="browser-body"><div class="source-menu"><div class="selected">Library</div><div>Playlists</div><div>Collections</div><div>Recently added</div></div><div><div class="source-heading">Night Transit</div><div class="source-meta">A local playlist fixture · ${items.length} sample items</div><div class="source-list">${items.map((item) => renderSourceRow(item)).join("")}</div><p id="session-queue-feedback" class="session-queue-feedback" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(sessionQueueFeedback)}</p></div></div>
     </section>
-    <div class="section-heading"><div><h2>Queue preview</h2><p>Selection and insertion behavior remain explicitly fixture-scoped.</p></div><span class="fixture-badge">no actions</span></div>
-    <div class="queue-card"><div class="unknown-note">The reference affordance for inserting selected source items was not captured safely. This scaffold preserves that behavior as unknown instead of inventing a button.</div></div>
+    <div class="section-heading"><div><h2>Queue preview</h2><p>Added records remain session-local fixture data.</p></div><span class="fixture-badge">session only</span></div>
+    <div class="queue-card"><div class="unknown-note">Added records appear separately in Converting. They begin waiting, do not start automatically, and produce no media output.</div></div>
   `;
+}
+
+function renderSourceRow(item: WorkflowSnapshot["sourceItems"][number]): string {
+  const isAdded = sessionQueueState.items.some((sessionItem) => sessionItem.sourceItemId === item.id);
+  return `<div class="source-row"><div><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.creator)} · ${escapeHtml(item.collection)}</span></div><div class="source-row-actions"><span>${escapeHtml(item.duration)}</span>${isAdded ? `<span class="session-queue-added">Added</span>` : ""}<button class="source-add-button" type="button" data-source-id="${escapeHtml(item.id)}" aria-label="Add ${escapeHtml(item.title)} to session queue">Add to session queue</button></div></div>`;
 }
 
 function renderConvertingQueue(projection: FixtureQueueProjection): string {
@@ -123,8 +135,20 @@ function renderConvertingQueue(projection: FixtureQueueProjection): string {
       <div id="queue-results">${renderConvertingResults(items)}</div>
       <div class="unknown-note">Retry and cancellation affordances are unknown in the captured workflow. No action controls are exposed in fixture mode.</div>
     </section>
+    ${renderSessionQueueAdditions()}
     ${renderLifecycleDemo()}
     <div class="footer-line"><span id="item-count">Items: ${items.length}</span><span>Output policy: ${snapshot?.outputPolicy.directory.state === "observed" ? "fixture-output" : "unknown"}</span></div>
+  `;
+}
+
+function renderSessionQueueAdditions(): string {
+  const items = sessionQueueState.items;
+  return `
+    <section class="queue-card session-queue-additions" aria-labelledby="session-queue-additions-heading">
+      <div class="section-heading"><div><h2 id="session-queue-additions-heading">Session queue additions</h2><p>Added during the current session · separate from canonical queue results</p></div><span class="fixture-badge">waiting only</span></div>
+      <p class="session-queue-note">These fixture records begin at Waiting, do not start converting automatically, and do not produce media output.</p>
+      ${items.length === 0 ? `<div class="empty">No session queue items have been added.</div>` : `<table class="queue-table"><caption class="visually-hidden">Session queue additions</caption><thead><tr><th scope="col">Title</th><th scope="col">Creator</th><th scope="col">Collection</th><th scope="col">Duration</th><th scope="col">Status</th></tr></thead><tbody>${items.map((item) => `<tr><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td><td><span class="status waiting">Waiting</span></td></tr>`).join("")}</tbody></table>`}
+    </section>
   `;
 }
 
@@ -305,6 +329,37 @@ function wireEvents(): void {
     renderShell();
 
     document.querySelector<HTMLButtonElement>("#advance-demo-step")?.focus();
+  });
+
+  document.querySelectorAll<HTMLButtonElement>("[data-source-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!snapshot) return;
+      const sourceItemId = button.dataset.sourceId;
+      if (!sourceItemId) return;
+
+      const result = insertSessionQueueItem({
+        state: sessionQueueState,
+        sourceItems: snapshot.sourceItems,
+        canonicalQueueItems: snapshot.queueItems,
+        sourceItemId,
+      });
+      sessionQueueState = result.state;
+      sessionQueueFeedback = result.kind === "added"
+        ? "Added to session queue"
+        : result.kind === "already-present"
+          ? "Already in session queue"
+          : "Unable to add source to session queue";
+      renderShell();
+      document.querySelectorAll<HTMLButtonElement>("[data-source-id]")
+        .forEach((nextButton) => {
+          if (nextButton.dataset.sourceId === sourceItemId) nextButton.focus();
+        });
+    });
+    button.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " " && event.key !== "Spacebar") return;
+      event.preventDefault();
+      button.click();
+    });
   });
 
   document.querySelector<HTMLSelectElement>("#filter")?.addEventListener("change", (event) => {
