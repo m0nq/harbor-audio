@@ -38,7 +38,10 @@ What user or engineering outcome does this change establish?
 - [ ] Reference observations, simulations, source implementation, automated
       acceptance, native acceptance, and manual accessibility QA are identified
       separately.
+- Approved specification revision:
+- Explicit implementation authorization:
 - [ ] Starting branch and commit are recorded.
+- Base SHA / current PR head SHA:
 - [ ] Final changed paths and complete diff were reviewed.
 - [ ] HARBOR-CI-01 is not described as hosted-CI verified without a successful
       GitHub-hosted run.
@@ -55,6 +58,8 @@ What user or engineering outcome does this change establish?
 - [ ] No privileged workflow trigger or unnecessary permission was added.
 - [ ] Dependency and lifecycle-script policy was followed.
 - [ ] Native Electron and manual accessibility claims are bounded separately.
+- [ ] Independent Loop 3 acceptance is pending or recorded separately from
+      implementation evidence; human merge approval remains separate.
 
 ## Risks and follow-up
 

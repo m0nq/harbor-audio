@@ -24,7 +24,8 @@ Status: adopted for the fixture-backed Harbor Audio scaffold.
 - The desktop safety hook that blocks dependency mutation must not be bypassed or weakened. If it blocks the install gate, record the exact hook message as an install-gate limitation and continue only with safe checks that do not mutate dependencies.
 - `npx --yes pnpm@12.12.1` is fallback-only, not a normal project command. Use it only in an explicitly approved recovery or bootstrap exception when bare pnpm is unavailable, and never to bypass the desktop safety hook.
 
-The hosted Node/JSDOM CI gate is a designated fresh environment. It must use
+The proposed HARBOR-CI-01 hosted Node/JSDOM gate is a designated fresh
+environment. If that configuration is separately merged and run, it must use
 the exact reviewed Node and pnpm versions, disable automatic installation in
 the setup action, and run:
 
@@ -39,8 +40,8 @@ execute during verification and remain subject to lockfile and review policy.
 
 Native Electron acceptance is a separate macOS operation. It may provision the
 exact Electron artifact required by the existing harness only through an
-explicitly authorized, isolated setup. It is not part of the hosted
-Node/JSDOM CI claim.
+explicitly authorized, isolated setup. It is not part of the proposed
+Node/JSDOM CI configuration or evidence of a hosted run.
 
 ## Verification outcome classification
 
@@ -79,13 +80,14 @@ For every dependency update, and for a designated fresh-environment bootstrap:
 ## Build-script and supply-chain controls
 
 - Do not disable package lifecycle scripts globally as a substitute for review.
-  The hosted Node/JSDOM CI exception is narrowly scoped to
+  The proposed HARBOR-CI-01 Node/JSDOM exception is narrowly scoped to
   `pnpm install --frozen-lockfile --ignore-scripts`; it does not relax ordinary
   dependency review or native Electron acceptance requirements.
 - Current Electron installation behavior does not require the historical
-  postinstall binary step for the Node/JSDOM CI slice. A native Electron run
-  still requires an explicitly provisioned matching artifact and isolated
-  test-owned profiles.
+  postinstall binary step for the proposed Node/JSDOM CI slice. A native
+  Electron run still requires an explicitly provisioned matching artifact and
+  isolated test-owned profiles. Neither statement claims that HARBOR-CI-01 has
+  been merged or executed on GitHub.
 - Do not introduce network access, login, credential handling, remote-provider adapters, DRM handling, or real media conversion as a side effect of a dependency update.
 - Do not commit credentials, tokens, local absolute paths, generated Electron binaries, or unreviewed vendor bundles.
 - Prefer the smallest update that resolves a security or compatibility need. Group unrelated updates into separate changes when practical.

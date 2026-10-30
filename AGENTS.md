@@ -24,6 +24,13 @@ media converter.
   enter the synthetic Converted dataset and do not create media output.
 - Keep the standalone lifecycle demonstration separate from session queue
   state.
+- Preserve the approved Converted sorting behavior: Title, Artist, Album, and
+  Duration sort ascending first and toggle on repeated activation; Artist,
+  Album, and Duration ties use Title A-Z, Title ties use Artist A-Z, exact
+  ties retain source order, invalid or missing durations sort last, sorting
+  does not mutate fixtures or filter membership, and sort state resets on a
+  fresh launch. This is current implementation and acceptance behavior, not
+  retroactive scope for the historical filtering SDD.
 
 Authoritative details belong in the supporting specifications rather than being
 duplicated here:
@@ -51,18 +58,26 @@ After the implementation scope is authorized, Codex may choose ordinary
 technical details, write focused failing tests, implement the smallest bounded
 change, refactor, review the diff, and repair ordinary failures.
 
+Codex may also perform ordinary, justified, in-scope refactoring when it
+preserves the approved contracts and file scope. New frameworks, dependencies,
+security-policy changes, or material architectural changes require separate
+authorization.
+
 Use existing TypeScript, pnpm, JSDOM, Electron, and test conventions. Do not
 introduce dependencies, abstractions, IPC, network behavior, or unrelated
 refactors without separate authorization.
 
 ### Loop 3 — Verify and review
 
-Independently and adversarially review the actual PR, specification, evidence,
-diff, tests, security boundaries, and acceptance claims. Classify findings as
-accepted, failed, blocked, historical, unavailable, or requiring follow-up.
-Perform QA, record lessons learned, and issue the final GO/HOLD acceptance
-recommendation. Do not accept intent, a green local check, or a historical
-result as proof of a broader claim.
+A fresh, independent reviewer must adversarially inspect the actual current PR,
+approved specification revision, implementation evidence, diff, tests,
+security boundaries, and acceptance claims. Implementer intent and reports are
+inputs, not proof. Classify findings as **Blocker**, **Should fix**, or
+**Observation**. Return implementation defects to Loop 2 and material
+requirement or authority changes to Loop 1. Reverify the updated PR head and
+base SHAs and all affected required checks before issuing acceptance. Perform
+risk-based QA, record lessons learned, and issue a human-facing GO/HOLD
+recommendation; human merge approval remains separate.
 
 ## Change-control authority
 
@@ -104,6 +119,11 @@ Every review must distinguish:
 Report exact commands and results, fresh versus historical evidence, unavailable
 checks, provenance, and remaining risks. Do not claim HARBOR-CI-01 hosted-CI
 validation until an actual GitHub-hosted run has completed successfully.
+
+Every implementation handoff must identify the approved specification revision,
+explicit implementation authorization, exact base and current PR head SHAs,
+affected checks, and the independent Loop 3 acceptance boundary. A draft PR,
+implementer report, or passing local check is not independent acceptance.
 
 ## Verification commands
 

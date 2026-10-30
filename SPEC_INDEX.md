@@ -11,9 +11,19 @@ verification records. It does not replace the linked documents.
 | `README.md` | Project overview | Current | Ownership, mission, capabilities, boundaries, and commands |
 | `DEPENDENCY_POLICY.md` | Dependency policy | Normative | Exact pins, lockfiles, installs, lifecycle scripts, and native artifact boundaries |
 | `CONVERTED_RENDERER_SDD.md` | Accepted feature SDD | Historical, scope-limited | Converted Artist/Album filtering contract and its bounded acceptance criteria |
-| `PARITY_MATRIX.md` | Capability ledger | Current | Reference status, implementation status, acceptance evidence, and open gaps |
+| `PARITY_MATRIX.md` | Capability ledger | Current; implementation-status reconciliation required | Reference status, implementation status, acceptance evidence, and open gaps |
 | `EVIDENCE_CAPTURE_PLAN.md` | Evidence procedure | Current | Bounded, non-destructive reference observation rules |
-| `evidence/evidence-manifest.json` | Evidence register | Append-only | Evidence provenance, confidence, unresolved behavior, and safety boundaries |
+| `evidence/evidence-manifest.json` | Evidence register | Append-only, traceability-preserving | Evidence provenance, confidence, unresolved behavior, and safety boundaries |
+
+The parity matrix remains valid historical reference evidence where it records
+reference observations and linked evidence IDs. Its implementation-status
+fields require reconciliation against current source and acceptance evidence
+before they are treated as current status. This reconciliation must not
+invalidate or silently rewrite the historical reference observations.
+
+The evidence manifest is preserved as a traceable historical register. A record
+that is genuinely erroneous may be corrected only through explicit review with
+an auditable reason and provenance; silent rewriting is not permitted.
 
 ## Evidence vocabulary
 
@@ -44,3 +54,17 @@ does not create or update Linear records.
 `CONVERTED_RENDERER_SDD.md` remains historically scoped to Converted filtering.
 It does not claim to have originally specified later sorting, Browser session
 queue insertion, or lifecycle work.
+
+Converted sorting is a later current implementation and acceptance contract,
+supported by source behavior and tests. This index does not invent or
+retroactively attribute a sorting specification to the historical filtering
+SDD. A future dedicated sorting specification or decision record requires
+explicit authorization.
+
+## Review handoff and acceptance boundary
+
+Each implementation handoff records the approved specification revision,
+explicit implementation authorization, exact base SHA and current PR head SHA,
+affected checks, and the independent Loop 3 acceptance status. A draft PR or
+implementer report does not constitute independent acceptance; human merge
+approval remains a separate decision.

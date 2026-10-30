@@ -64,11 +64,13 @@ The native Electron artifact and dependency tree are governed by the project
 dependency policy. Do not install or acquire dependencies outside an approved,
 reviewed workflow.
 
-Hosted CI is intentionally narrower: it provisions the pinned Node and pnpm
-toolchain, installs the lockfile with lifecycle scripts disabled, typechecks,
-builds, and runs the Node/JSDOM suite. It does not establish native Electron,
-physical keyboard, VoiceOver, or screen-reader acceptance. Do not claim
-HARBOR-CI-01 hosted-CI validation until a real GitHub-hosted run passes.
+The proposed HARBOR-CI-01 hosted-CI configuration is intentionally narrower:
+it would provision the pinned Node and pnpm toolchain, install the lockfile
+with lifecycle scripts disabled, typecheck, build, and run the Node/JSDOM
+suite. It would not establish native Electron, physical keyboard, VoiceOver,
+or screen-reader acceptance. This proposal is not evidence that the workflow
+has been merged or successfully executed on GitHub. Do not claim HARBOR-CI-01
+hosted-CI validation until a real GitHub-hosted run passes.
 
 ## Installation and quick start
 
