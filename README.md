@@ -1,18 +1,25 @@
 # Harbor Audio
 
-Harbor Audio is a private, personal-use Electron application for exploring a
-small, fixture-backed workflow parity scaffold. It provides a deterministic
-local shell for the Browser, Converting, and Converted views. It is an
-original implementation informed by bounded observations of an external
-application; it is not an official AudFree product or integration.
+Harbor Audio is an internal Cloud City desktop product pursuing comprehensive
+functional parity within authorized boundaries. Its current implementation
+stage is a deterministic, fixture-only Electron scaffold for the Browser,
+Converting, and Converted views. It is an original implementation informed by
+bounded observations of an external application; it is not an official AudFree
+product or integration.
+
+The intended portfolio home is the existing Cloud City workspace and CLO team.
+No separate workspace or team is required. Future Linear tickets should use
+native `CLO-*` identifiers while retaining historical `HARBOR-*` milestone
+references for engineering continuity.
 
 ## Current maturity
 
-The project is a functional local scaffold, not a production media
+The project is a functional local scaffold, not yet a production media
 converter. The renderer, domain projections, synthetic Converted dataset,
-build pipeline, Node tests, and isolated Electron E2E harness are implemented.
-The repository deliberately keeps unverified product behavior as unknown
-instead of inventing it.
+session queue simulation, build pipeline, Node tests, and isolated Electron E2E
+harness are implemented. Fixture-only behavior is the current stage of the
+parity effort, not a permanent product limitation. The repository deliberately
+keeps unverified product behavior as unknown instead of inventing it.
 
 ## Implemented features
 
@@ -24,6 +31,11 @@ instead of inventing it.
   states, and in-session selection preservation.
 - Explicit Converted sorting by Title, Artist, Album, and Duration with
   deterministic tie-breaking and source-order fallback.
+- Browser source insertion into a session-local queue with duplicate
+  prevention, stable session identities, and insertion-order preservation.
+- Explicit per-item simulated lifecycle progression from Waiting through
+  Analyzing, Converting, and Converted; completed session items remain outside
+  the synthetic Converted dataset and create no media output.
 - Node/JSDOM regression coverage and a Playwright Electron acceptance harness
   using isolated test profiles.
 
@@ -37,6 +49,9 @@ instead of inventing it.
   outside the current scope.
 - Fixture behavior is bounded and does not claim complete AudFree parity,
   universal Search semantics, or real assistive-technology validation.
+- Reference observations, fixture simulations, source implementation,
+  automated acceptance, native acceptance, and manual accessibility QA are
+  separate evidence classes.
 
 ## Requirements
 
@@ -48,6 +63,12 @@ instead of inventing it.
 The native Electron artifact and dependency tree are governed by the project
 dependency policy. Do not install or acquire dependencies outside an approved,
 reviewed workflow.
+
+Hosted CI is intentionally narrower: it provisions the pinned Node and pnpm
+toolchain, installs the lockfile with lifecycle scripts disabled, typechecks,
+builds, and runs the Node/JSDOM suite. It does not establish native Electron,
+physical keyboard, VoiceOver, or screen-reader acceptance. Do not claim
+HARBOR-CI-01 hosted-CI validation until a real GitHub-hosted run passes.
 
 ## Installation and quick start
 
@@ -96,6 +117,10 @@ test-owned temporary `userData` and `sessionData` paths, and cleans up only
 processes and profiles owned by the test. Failed diagnostics may be retained
 for review.
 
+Native Electron acceptance is independent of hosted Node/JSDOM CI. Physical
+keyboard, VoiceOver, screen-reader, and other manual accessibility checks must
+be reported separately from automated JSDOM or Playwright results.
+
 ## Architecture
 
 - `src/main.ts` creates the Electron window, applies the local renderer path,
@@ -130,18 +155,21 @@ or security policy as part of ordinary feature work.
 
 ## Repository guidance and maintenance
 
-Read [AGENTS.md](AGENTS.md) before making repository changes. Prefer bounded
-SDD/TDD work with focused diffs, exact dependency pins, and evidence-backed
-validation. Dependency or lockfile changes, remote mutation, pushes, commits,
-destructive Git actions, and publication require explicit authorization.
+Read [AGENTS.md](AGENTS.md) before making repository changes. Use the
+[specification index](SPEC_INDEX.md) to locate authoritative contracts and
+evidence. Prefer bounded Three-Loop SDD/TDD work with focused diffs, exact
+dependency pins, and evidence-backed validation. A single explicit bounded
+batch may authorize branch, commit, push, pull-request creation, and in-scope
+repair; merge, settings, branch protection, and Linear mutation remain
+separately authorized.
 
 Report the exact commands and results used for validation; do not claim a test
 or runtime check was performed without execution evidence.
 
 ## Private-use and distribution status
 
-This repository and application are private personal-use work. No public
-distribution, commercial release, license grant, packaging identity, signing
-identity, or official association with AudFree is claimed here. Historical
-references to AudFree describe the external application used as bounded parity
-evidence only.
+This repository and application are internal Cloud City work for private,
+authorized use. No public distribution, commercial release, license grant,
+packaging identity, signing identity, or official association with AudFree is
+claimed here. Historical references to AudFree describe the external
+application used as bounded parity evidence only.
