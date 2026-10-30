@@ -43,8 +43,8 @@ What user or engineering outcome does this change establish?
 - [ ] Starting branch and commit are recorded.
 - Base SHA / current PR head SHA:
 - [ ] Final changed paths and complete diff were reviewed.
-- [ ] HARBOR-CI-01 is not described as hosted-CI verified without a successful
-      GitHub-hosted run.
+- [ ] Any hosted-CI claim is supported by a successful run against the relevant
+      revision; proposed or unexecuted workflows are labeled as such.
 
 ## Validation
 

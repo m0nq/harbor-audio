@@ -9,6 +9,11 @@ The product is informed by bounded observations of an external application. It
 is not an official AudFree product, integration, provider client, or production
 media converter.
 
+Do not access real AudFree accounts, credentials, personal application
+profiles, or personal media. AudFree references are bounded external evidence
+only; they do not authorize access to AudFree systems or expand Harbor Audio's
+implementation scope.
+
 ## Product and security boundaries
 
 - Keep the current implementation local-first and deterministic.
@@ -63,9 +68,11 @@ preserves the approved contracts and file scope. New frameworks, dependencies,
 security-policy changes, or material architectural changes require separate
 authorization.
 
-Use existing TypeScript, pnpm, JSDOM, Electron, and test conventions. Do not
-introduce dependencies, abstractions, IPC, network behavior, or unrelated
-refactors without separate authorization.
+Use existing TypeScript, pnpm, JSDOM, Electron, and test conventions. Ordinary
+internal abstractions and refactoring are allowed when justified, in scope, and
+contract-preserving. Do not introduce new frameworks, dependencies, IPC,
+network behavior, security-boundary changes, material architecture, or
+unrelated refactors without separate authorization.
 
 ### Loop 3 — Verify and review
 
@@ -82,10 +89,15 @@ recommendation; human merge approval remains separate.
 ## Change-control authority
 
 - Read-only investigation and recommendations do not authorize edits.
-- One explicit bounded batch authorization may cover creation of a dedicated
-  branch, implementation, commit, push, pull-request creation, and in-scope
-  PR repair. Do not request individual approval for each already-authorized
-  Git operation in that batch.
+- One explicit, traceable human authorization for a bounded batch must identify
+  the approved outcome, file and behavior scope, permitted operations, and
+  applicable restrictions. It may cover creation of a dedicated branch,
+  implementation, commit, push, pull-request creation, and ordinary in-scope
+  PR repair without requiring fresh approval for each correction. Escalate new
+  requirements, consequential scope expansion, unauthorized Git operations,
+  and changes to security or architecture boundaries. A safety hook may still
+  require direct confirmation for an exact remote export; that requirement
+  remains controlling.
 - Merge, branch protection, GitHub Actions settings, Linear records, releases,
   and production-impacting changes remain separately authorized operations.
 - Stay on the authorized branch and stop on unexplained provenance, scope,
