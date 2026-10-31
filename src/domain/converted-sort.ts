@@ -9,6 +9,7 @@ export interface ConvertedSortState {
 }
 
 const textCollator = new Intl.Collator("en-US", { sensitivity: "base", numeric: false });
+const maxSafeDurationSeconds = BigInt(Number.MAX_SAFE_INTEGER);
 
 function compareCodeUnits(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -21,13 +22,17 @@ export function compareConvertedText(left: string, right: string): number {
 /** Parse the fixture's supported MM:SS and H:MM:SS duration formats. */
 export function parseDurationSeconds(value: string): number | undefined {
   const minuteSecond = /^(\d+):([0-5]\d)$/.exec(value);
-  if (minuteSecond) return Number(minuteSecond[1]) * 60 + Number(minuteSecond[2]);
+  if (minuteSecond) {
+    const totalSeconds = BigInt(minuteSecond[1]) * 60n + BigInt(minuteSecond[2]);
+    return totalSeconds <= maxSafeDurationSeconds ? Number(totalSeconds) : undefined;
+  }
 
   const hourMinuteSecond = /^(\d+):([0-5]\d):([0-5]\d)$/.exec(value);
   if (hourMinuteSecond) {
-    return Number(hourMinuteSecond[1]) * 3600
-      + Number(hourMinuteSecond[2]) * 60
-      + Number(hourMinuteSecond[3]);
+    const totalSeconds = BigInt(hourMinuteSecond[1]) * 3600n
+      + BigInt(hourMinuteSecond[2]) * 60n
+      + BigInt(hourMinuteSecond[3]);
+    return totalSeconds <= maxSafeDurationSeconds ? Number(totalSeconds) : undefined;
   }
 
   return undefined;
