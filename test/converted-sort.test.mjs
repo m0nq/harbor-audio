@@ -97,6 +97,34 @@ test("duration parsing is strict and invalid or missing values sort last", () =>
   assert.deepEqual(ids(sortConvertedItems(items, state("duration", "descending"))), ["valid", "invalid", "missing"]);
 });
 
+test("duration parsing preserves the safe-integer boundary and rejects overflow", () => {
+  assert.equal(parseDurationSeconds("150119987579016:31"), Number.MAX_SAFE_INTEGER);
+  assert.equal(parseDurationSeconds("2501999792983:36:31"), Number.MAX_SAFE_INTEGER);
+  assert.equal(parseDurationSeconds("150119987579016:32"), undefined);
+  assert.equal(parseDurationSeconds("2501999792983:36:32"), undefined);
+  assert.equal(parseDurationSeconds(`${"9".repeat(400)}:00`), undefined);
+});
+
+test("overflowing and non-finite durations sort last in either direction", () => {
+  const items = [
+    synthetic("overflow-mm", "Overflow MM", "Artist", "Album", "150119987579016:32"),
+    synthetic("normal", "Normal", "Artist", "Album", "00:30"),
+    synthetic("missing", "Missing", "Artist", "Album", ""),
+    synthetic("safe-boundary", "Safe Boundary", "Artist", "Album", "2501999792983:36:31"),
+    synthetic("malformed", "Malformed", "Artist", "Album", "03:60"),
+    synthetic("non-finite", "Non-Finite", "Artist", "Album", `${"9".repeat(400)}:00`),
+    synthetic("overflow-hms", "Overflow HMS", "Artist", "Album", "2501999792983:36:32"),
+  ];
+
+  for (const direction of ["ascending", "descending"]) {
+    const result = sortConvertedItems(items, state("duration", direction));
+    assert.deepEqual(ids(result).slice(0, 2), direction === "ascending"
+      ? ["normal", "safe-boundary"]
+      : ["safe-boundary", "normal"]);
+    assert.ok(result.slice(2).every((item) => parseDurationSeconds(item.duration) === undefined));
+  }
+});
+
 test("sorting does not mutate canonical Converted records or nested metadata", () => {
   const before = structuredClone(convertedFilterItems);
   sortConvertedItems(convertedFilterItems, state("album", "ascending"));
