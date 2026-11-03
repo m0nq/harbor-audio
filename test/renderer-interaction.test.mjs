@@ -8,14 +8,29 @@ import { fixtureSnapshot } from "../dist/fixtures/workflow-fixtures.js";
 
 const rendererPath = path.resolve("dist/renderer/renderer/renderer.js");
 
-async function createRendererDom(scenarioId) {
+async function createRendererDom(scenarioId, options = {}) {
   const htmlPath = path.resolve("dist/renderer/index.html");
   const html = await readFile(htmlPath, "utf8");
   const dom = new JSDOM(html, { url: pathToFileURL(htmlPath).href });
   const runtimeErrors = [];
   const networkAttempts = [];
   const ipcAttempts = [];
+  const sessionQueueListenerRegistrations = [];
+  const originalAddEventListener = dom.window.EventTarget.prototype.addEventListener;
   let fixtureCalls = 0;
+
+  if (options.trackSessionQueueListeners) {
+    dom.window.EventTarget.prototype.addEventListener = function addEventListener(type, listener, listenerOptions) {
+      if (type === "click" && typeof this.matches === "function" && this.matches("[data-session-queue-id]")) {
+        sessionQueueListenerRegistrations.push({
+          tagName: this.tagName,
+          className: this.className,
+          withinSessionResults: Boolean(this.closest("#session-queue-results")),
+        });
+      }
+      return originalAddEventListener.call(this, type, listener, listenerOptions);
+    };
+  }
 
   const blockNetwork = (kind) => (...args) => {
     networkAttempts.push({ kind, args });
@@ -75,6 +90,7 @@ async function createRendererDom(scenarioId) {
     rendererModule = await import(`${pathToFileURL(rendererPath).href}?renderer-interaction-${scenarioId}`);
     await settleRenderer();
   } catch (error) {
+    dom.window.EventTarget.prototype.addEventListener = originalAddEventListener;
     restoreGlobals(previousGlobals);
     dom.window.close();
     throw error;
@@ -87,7 +103,9 @@ async function createRendererDom(scenarioId) {
     runtimeErrors,
     networkAttempts,
     ipcAttempts,
+    sessionQueueListenerRegistrations,
     dispose: () => {
+      dom.window.EventTarget.prototype.addEventListener = originalAddEventListener;
       restoreGlobals(previousGlobals);
       dom.window.close();
     },
@@ -482,6 +500,45 @@ test("compiled renderer interaction suite", async (t) => {
       assertRuntimeBoundaries(freshHarness);
     } finally {
       freshHarness.dispose();
+    }
+  });
+
+  await t.test("binds advancement only to active action buttons after repeated history navigation", async () => {
+    const harness = await createRendererDom("session-history-listeners", { trackSessionQueueListeners: true });
+
+    try {
+      const document = documentFor(harness);
+      document.querySelector('[data-source-id="source-aurora"]').click();
+      await clickView(harness, "converting");
+
+      for (let step = 0; step < 3; step += 1) {
+        const action = sessionQueueActions(document)[0];
+        action.focus();
+        action.click();
+        await settleRenderer();
+      }
+
+      for (const view of ["converted", "browser", "converting", "converted", "browser", "converted"]) {
+        await clickView(harness, view);
+      }
+
+      const registrations = harness.sessionQueueListenerRegistrations;
+      assert.ok(registrations.length > 0, "expected active session action listeners to be registered");
+      assert.deepEqual(
+        registrations.filter((registration) => (
+          registration.tagName !== "BUTTON"
+          || !String(registration.className).includes("session-queue-advance")
+          || !registration.withinSessionResults
+        )),
+        [],
+        "completed history rows must not receive session advancement listeners",
+      );
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"] tbody tr')?.tagName, "TR");
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"] tbody tr')?.classList.contains("session-queue-advance"), false);
+      assert.equal(completedSessionIds(document)[0], "session-queue:source-aurora:1");
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
     }
   });
 

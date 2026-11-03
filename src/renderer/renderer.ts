@@ -486,7 +486,7 @@ function wireSecondaryControl(): void {
 }
 
 function wireSessionQueueControls(): void {
-  document.querySelectorAll<HTMLButtonElement>("[data-session-queue-id]").forEach((button) => {
+  document.querySelectorAll<HTMLButtonElement>("#session-queue-results button.session-queue-advance[data-session-queue-id]").forEach((button) => {
     button.addEventListener("click", () => {
       const sessionQueueItemId = button.dataset.sessionQueueId;
       if (!sessionQueueItemId) return;
@@ -503,7 +503,7 @@ function wireSessionQueueControls(): void {
       if (result.item.status === "converted") {
         document.querySelector<HTMLParagraphElement>("#session-queue-announcement")?.focus();
       } else {
-        [...document.querySelectorAll<HTMLButtonElement>("[data-session-queue-id]")]
+        [...document.querySelectorAll<HTMLButtonElement>("#session-queue-results button.session-queue-advance[data-session-queue-id]")]
           .find((nextButton) => nextButton.dataset.sessionQueueId === sessionQueueItemId)
           ?.focus();
       }
