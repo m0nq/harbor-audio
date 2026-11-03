@@ -69,6 +69,18 @@ export function resetSessionQueue(): SessionQueueState {
   return createSessionQueueState();
 }
 
+export function projectActiveSessionQueueItems(
+  state: SessionQueueState,
+): readonly SessionQueueItem[] {
+  return Object.freeze(state.items.filter((item) => item.status !== "converted"));
+}
+
+export function projectCompletedSessionItems(
+  state: SessionQueueState,
+): readonly SessionQueueItem[] {
+  return Object.freeze(state.items.filter((item) => item.status === "converted"));
+}
+
 export function insertSessionQueueItem(
   input: InsertSessionQueueItemInput,
 ): SessionQueueInsertionResult {

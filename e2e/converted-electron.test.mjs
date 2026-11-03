@@ -23,6 +23,8 @@ const canonicalConvertingRowsSelector =
   'section[aria-label="Converting fixture list"] tbody tr';
 const sessionQueueRowsSelector =
   'section[aria-labelledby="session-queue-additions-heading"] tbody tr';
+const completedSessionRowsSelector =
+  'section[aria-labelledby="completed-session-heading"] tbody tr';
 
 function isolatedEnvironment() {
   const environment = Object.fromEntries(
@@ -673,7 +675,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("advances session items once per native keypress and keeps terminal items inert", async () => {
+  await t.test("connects session completion to Converted while preserving native focus and identity", async () => {
     await withElectronLaunch("session-queue-lifecycle", async ({ page }) => {
       const session = page.locator('section[aria-labelledby="session-queue-additions-heading"]');
       await page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true }).press("Enter");
@@ -703,37 +705,31 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
 
       aurora = activeAurora("Converting");
       await aurora.press("Enter");
-      assert.deepEqual(await statusTexts(), ["Converted", "Waiting"]);
-      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), auroraId);
-
-      const terminal = session.getByRole("button", {
-        name: "Aurora Lines is already Converted (simulated complete)",
-        exact: true,
-      });
-      assert.equal(await terminal.textContent(), "Completed");
-      assert.equal(await terminal.getAttribute("aria-disabled"), "true");
-      assert.equal(await terminal.evaluate((button) => button.disabled), false);
-      await terminal.focus();
-      await terminal.press("Space");
-      assert.deepEqual(await statusTexts(), ["Converted", "Waiting"]);
-      assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), auroraId);
+      assert.deepEqual(await statusTexts(), ["Waiting"]);
+      assert.equal(await page.evaluate(() => document.activeElement?.id), "session-queue-announcement");
+      assert.match(await session.locator("#session-queue-announcement").textContent(), /Aurora Lines.*Converted.*simulated.*Converted.*no media output/i);
 
       const blue = session.getByRole("button", {
         name: "Advance Blue Hour from Waiting (simulated)",
         exact: true,
       });
       await blue.press("Enter");
-      assert.deepEqual(await statusTexts(), ["Converted", "Analyzing"]);
+      assert.deepEqual(await statusTexts(), ["Analyzing"]);
       assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("data-session-queue-id")), blueId);
-      assert.equal(await page.locator(convertedRowsSelector).count(), 0);
+      assert.equal(await page.locator(completedSessionRowsSelector).count(), 0);
       assert.match(await session.textContent(), /no media output/i);
 
       await page.getByRole("button", { name: "Converted", exact: true }).click();
       await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
+      assert.equal(await page.locator(completedSessionRowsSelector).count(), 1);
+      assert.equal(await page.locator(`${completedSessionRowsSelector} td:first-child`).textContent(), "Aurora Lines");
+      assert.equal(await page.locator(completedSessionRowsSelector).getAttribute("data-session-queue-id"), auroraId);
+      assert.match(await page.locator('section[aria-labelledby="completed-session-heading"]').textContent(), /simulated.*no output file/i);
       assert.equal(await page.locator(convertedRowsSelector).count(), 5);
+      assert.equal(await page.locator("#result-count").textContent(), "5 results");
       await page.getByRole("button", { name: "Converting", exact: true }).click();
       await session.waitFor({ state: "visible" });
-      assert.deepEqual(await statusTexts(), ["Converted", "Analyzing"]);
+      assert.deepEqual(await statusTexts(), ["Analyzing"]);
     });
 
     await withElectronLaunch("session-queue-lifecycle-fresh", async ({ page }) => {

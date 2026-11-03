@@ -4,6 +4,8 @@ import {
   advanceSessionQueueItem,
   createSessionQueueState,
   insertSessionQueueItem,
+  projectActiveSessionQueueItems,
+  projectCompletedSessionItems,
   resetSessionQueue,
 } from "../dist/domain/session-queue.js";
 import { lifecycleDemoRecord } from "../dist/domain/lifecycle-demo.js";
@@ -220,4 +222,36 @@ test("duplicate prevention remains stable after a session item reaches Converted
   assert.strictEqual(duplicate.item, state.items[0]);
   assert.equal(state.items[0].status, "converted");
   assert.equal(state.nextInsertionOrdinal, 2);
+});
+
+test("projects active and completed session records from authoritative state in insertion order", () => {
+  let state = createSessionQueueState();
+  const first = insert(state, "source-aurora");
+  assert.equal(first.kind, "added");
+  state = first.state;
+  const second = insert(state, "source-blue-hour");
+  assert.equal(second.kind, "added");
+  state = second.state;
+
+  for (let index = 0; index < 3; index += 1) {
+    const result = advance(state, second.item.id);
+    assert.equal(result.kind, "advanced");
+    state = result.state;
+  }
+
+  assert.deepEqual(projectActiveSessionQueueItems(state).map((item) => item.id), [first.item.id]);
+  assert.deepEqual(projectCompletedSessionItems(state).map((item) => item.id), [second.item.id]);
+  assert.equal(projectCompletedSessionItems(state)[0].sourceItemId, "source-blue-hour");
+
+  for (let index = 0; index < 3; index += 1) {
+    const result = advance(state, first.item.id);
+    assert.equal(result.kind, "advanced");
+    state = result.state;
+  }
+
+  assert.deepEqual(projectActiveSessionQueueItems(state), []);
+  assert.deepEqual(projectCompletedSessionItems(state).map((item) => item.id), [first.item.id, second.item.id]);
+  assert.deepEqual(state.items.map((item) => item.status), ["converted", "converted"]);
+  assert.ok(Object.isFrozen(projectActiveSessionQueueItems(state)));
+  assert.ok(Object.isFrozen(projectCompletedSessionItems(state)));
 });

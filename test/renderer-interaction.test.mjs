@@ -8,14 +8,29 @@ import { fixtureSnapshot } from "../dist/fixtures/workflow-fixtures.js";
 
 const rendererPath = path.resolve("dist/renderer/renderer/renderer.js");
 
-async function createRendererDom(scenarioId) {
+async function createRendererDom(scenarioId, options = {}) {
   const htmlPath = path.resolve("dist/renderer/index.html");
   const html = await readFile(htmlPath, "utf8");
   const dom = new JSDOM(html, { url: pathToFileURL(htmlPath).href });
   const runtimeErrors = [];
   const networkAttempts = [];
   const ipcAttempts = [];
+  const sessionQueueListenerRegistrations = [];
+  const originalAddEventListener = dom.window.EventTarget.prototype.addEventListener;
   let fixtureCalls = 0;
+
+  if (options.trackSessionQueueListeners) {
+    dom.window.EventTarget.prototype.addEventListener = function addEventListener(type, listener, listenerOptions) {
+      if (type === "click" && typeof this.matches === "function" && this.matches("[data-session-queue-id]")) {
+        sessionQueueListenerRegistrations.push({
+          tagName: this.tagName,
+          className: this.className,
+          withinSessionResults: Boolean(this.closest("#session-queue-results")),
+        });
+      }
+      return originalAddEventListener.call(this, type, listener, listenerOptions);
+    };
+  }
 
   const blockNetwork = (kind) => (...args) => {
     networkAttempts.push({ kind, args });
@@ -75,6 +90,7 @@ async function createRendererDom(scenarioId) {
     rendererModule = await import(`${pathToFileURL(rendererPath).href}?renderer-interaction-${scenarioId}`);
     await settleRenderer();
   } catch (error) {
+    dom.window.EventTarget.prototype.addEventListener = originalAddEventListener;
     restoreGlobals(previousGlobals);
     dom.window.close();
     throw error;
@@ -87,7 +103,9 @@ async function createRendererDom(scenarioId) {
     runtimeErrors,
     networkAttempts,
     ipcAttempts,
+    sessionQueueListenerRegistrations,
     dispose: () => {
+      dom.window.EventTarget.prototype.addEventListener = originalAddEventListener;
       restoreGlobals(previousGlobals);
       dom.window.close();
     },
@@ -139,6 +157,16 @@ function sessionQueueStatuses(document) {
 
 function sessionQueueActions(document) {
   return [...document.querySelectorAll('section[aria-labelledby="session-queue-additions-heading"] [data-session-queue-id]')];
+}
+
+function completedSessionTitles(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="completed-session-heading"] tbody tr td:first-child')]
+    .map((element) => element.textContent);
+}
+
+function completedSessionIds(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="completed-session-heading"] tbody tr')]
+    .map((element) => element.getAttribute("data-session-queue-id"));
 }
 
 function queueSummary(document) {
@@ -264,6 +292,7 @@ test("compiled renderer interaction suite", async (t) => {
 
       await clickView(harness, "converted");
       assert.equal(heading(document), "Completed items");
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"]')?.querySelector(".empty")?.textContent, "No session jobs have completed in this session.");
       assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
       assert.equal(document.querySelector("#converted-dimension")?.value, "all");
       assert.equal(document.querySelector("#converted-value"), null);
@@ -380,7 +409,7 @@ test("compiled renderer interaction suite", async (t) => {
     }
   });
 
-  await t.test("advances targeted session items with stable announcements, labels, focus, and terminal no-op behavior", async () => {
+  await t.test("connects completion to Converted without mixing demonstration history", async () => {
     const harness = await createRendererDom("session-queue-lifecycle");
 
     try {
@@ -395,6 +424,7 @@ test("compiled renderer interaction suite", async (t) => {
       assert.ok(announcement);
       assert.equal(announcement.getAttribute("role"), "status");
       assert.equal(announcement.getAttribute("aria-live"), "polite");
+      assert.equal(announcement.getAttribute("tabindex"), "-1");
       assert.deepEqual(sessionQueueStatuses(document), ["Waiting", "Waiting"]);
       assert.deepEqual(sessionQueueActions(document).map((button) => button.getAttribute("aria-label")), [
         "Advance Aurora Lines from Waiting (simulated)",
@@ -418,7 +448,7 @@ test("compiled renderer interaction suite", async (t) => {
       assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
       assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
 
-      for (const expectedStatus of ["Converting", "Converted"]) {
+      for (const expectedStatus of ["Converting"]) {
         const action = sessionQueueActions(document)[0];
         action.focus();
         action.click();
@@ -427,24 +457,36 @@ test("compiled renderer interaction suite", async (t) => {
         assert.equal(document.activeElement?.getAttribute("data-session-queue-id"), "session-queue:source-aurora:1");
       }
 
-      const terminal = sessionQueueActions(document)[0];
-      assert.equal(terminal.textContent, "Completed");
-      assert.equal(terminal.getAttribute("aria-disabled"), "true");
-      assert.equal(terminal.disabled, false);
-      const terminalAnnouncement = announcement.textContent;
-      terminal.focus();
-      terminal.click();
+      const completionAction = sessionQueueActions(document)[0];
+      completionAction.focus();
+      completionAction.click();
       await settleRenderer();
-      assert.deepEqual(sessionQueueStatuses(document), ["Converted", "Waiting"]);
-      assert.strictEqual(document.activeElement, terminal);
-      assert.equal(announcement.textContent, terminalAnnouncement);
+      assert.deepEqual(sessionQueueStatuses(document), ["Waiting"]);
+      assert.equal(sessionQueueTitles(document)[0], "Blue Hour");
+      assert.equal(document.activeElement, announcement);
+      assert.match(announcement.textContent, /Aurora Lines.*Converted.*simulated.*Converted.*no media output/i);
+      assert.equal(completedSessionTitles(document).length, 0);
+
+      await clickView(harness, "converted");
+      assert.deepEqual(completedSessionTitles(document), ["Aurora Lines"]);
+      assert.deepEqual(completedSessionIds(document), ["session-queue:source-aurora:1"]);
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"] tbody tr')?.getAttribute("data-source-item-id"), "source-aurora");
+      assert.match(document.querySelector('section[aria-labelledby="completed-session-heading"]')?.textContent, /simulated.*no output file/i);
+      assert.equal(document.querySelectorAll('section[aria-labelledby="completed-session-heading"] tbody tr').length, 1);
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
+      assert.equal(document.querySelector("#result-count")?.textContent, "5 results");
+
+      await setDimension(harness, "artist");
+      await setSecondaryByLabel(harness, "Lead Artist");
+      assert.deepEqual(completedSessionTitles(document), ["Aurora Lines"]);
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Alpha Other"]);
 
       await clickView(harness, "browser");
       document.querySelector('[data-source-id="source-aurora"]').click();
       await settleRenderer();
       assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Already in session queue");
       await clickView(harness, "converting");
-      assert.deepEqual(sessionQueueStatuses(document), ["Converted", "Waiting"]);
+      assert.deepEqual(sessionQueueStatuses(document), ["Waiting"]);
       assertRuntimeBoundaries(harness);
     } finally {
       harness.dispose();
@@ -458,6 +500,45 @@ test("compiled renderer interaction suite", async (t) => {
       assertRuntimeBoundaries(freshHarness);
     } finally {
       freshHarness.dispose();
+    }
+  });
+
+  await t.test("binds advancement only to active action buttons after repeated history navigation", async () => {
+    const harness = await createRendererDom("session-history-listeners", { trackSessionQueueListeners: true });
+
+    try {
+      const document = documentFor(harness);
+      document.querySelector('[data-source-id="source-aurora"]').click();
+      await clickView(harness, "converting");
+
+      for (let step = 0; step < 3; step += 1) {
+        const action = sessionQueueActions(document)[0];
+        action.focus();
+        action.click();
+        await settleRenderer();
+      }
+
+      for (const view of ["converted", "browser", "converting", "converted", "browser", "converted"]) {
+        await clickView(harness, view);
+      }
+
+      const registrations = harness.sessionQueueListenerRegistrations;
+      assert.ok(registrations.length > 0, "expected active session action listeners to be registered");
+      assert.deepEqual(
+        registrations.filter((registration) => (
+          registration.tagName !== "BUTTON"
+          || !String(registration.className).includes("session-queue-advance")
+          || !registration.withinSessionResults
+        )),
+        [],
+        "completed history rows must not receive session advancement listeners",
+      );
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"] tbody tr')?.tagName, "TR");
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"] tbody tr')?.classList.contains("session-queue-advance"), false);
+      assert.equal(completedSessionIds(document)[0], "session-queue:source-aurora:1");
+      assertRuntimeBoundaries(harness);
+    } finally {
+      harness.dispose();
     }
   });
 
