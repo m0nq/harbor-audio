@@ -141,6 +141,16 @@ function sessionQueueActions(document) {
   return [...document.querySelectorAll('section[aria-labelledby="session-queue-additions-heading"] [data-session-queue-id]')];
 }
 
+function completedSessionTitles(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="completed-session-heading"] tbody tr td:first-child')]
+    .map((element) => element.textContent);
+}
+
+function completedSessionIds(document) {
+  return [...document.querySelectorAll('section[aria-labelledby="completed-session-heading"] tbody tr')]
+    .map((element) => element.getAttribute("data-session-queue-id"));
+}
+
 function queueSummary(document) {
   const queueHeading = [...document.querySelectorAll("h2")]
     .find((element) => element.textContent === "Converting" || element.textContent === "Converted");
@@ -264,6 +274,7 @@ test("compiled renderer interaction suite", async (t) => {
 
       await clickView(harness, "converted");
       assert.equal(heading(document), "Completed items");
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"]')?.querySelector(".empty")?.textContent, "No session jobs have completed in this session.");
       assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
       assert.equal(document.querySelector("#converted-dimension")?.value, "all");
       assert.equal(document.querySelector("#converted-value"), null);
@@ -380,7 +391,7 @@ test("compiled renderer interaction suite", async (t) => {
     }
   });
 
-  await t.test("advances targeted session items with stable announcements, labels, focus, and terminal no-op behavior", async () => {
+  await t.test("connects completion to Converted without mixing demonstration history", async () => {
     const harness = await createRendererDom("session-queue-lifecycle");
 
     try {
@@ -395,6 +406,7 @@ test("compiled renderer interaction suite", async (t) => {
       assert.ok(announcement);
       assert.equal(announcement.getAttribute("role"), "status");
       assert.equal(announcement.getAttribute("aria-live"), "polite");
+      assert.equal(announcement.getAttribute("tabindex"), "-1");
       assert.deepEqual(sessionQueueStatuses(document), ["Waiting", "Waiting"]);
       assert.deepEqual(sessionQueueActions(document).map((button) => button.getAttribute("aria-label")), [
         "Advance Aurora Lines from Waiting (simulated)",
@@ -418,7 +430,7 @@ test("compiled renderer interaction suite", async (t) => {
       assert.deepEqual(queueTitles(document), ["Aurora Lines", "Blue Hour"]);
       assert.equal(queueSummary(document), "2 fixture jobs · 1 failed · 0 converted");
 
-      for (const expectedStatus of ["Converting", "Converted"]) {
+      for (const expectedStatus of ["Converting"]) {
         const action = sessionQueueActions(document)[0];
         action.focus();
         action.click();
@@ -427,24 +439,36 @@ test("compiled renderer interaction suite", async (t) => {
         assert.equal(document.activeElement?.getAttribute("data-session-queue-id"), "session-queue:source-aurora:1");
       }
 
-      const terminal = sessionQueueActions(document)[0];
-      assert.equal(terminal.textContent, "Completed");
-      assert.equal(terminal.getAttribute("aria-disabled"), "true");
-      assert.equal(terminal.disabled, false);
-      const terminalAnnouncement = announcement.textContent;
-      terminal.focus();
-      terminal.click();
+      const completionAction = sessionQueueActions(document)[0];
+      completionAction.focus();
+      completionAction.click();
       await settleRenderer();
-      assert.deepEqual(sessionQueueStatuses(document), ["Converted", "Waiting"]);
-      assert.strictEqual(document.activeElement, terminal);
-      assert.equal(announcement.textContent, terminalAnnouncement);
+      assert.deepEqual(sessionQueueStatuses(document), ["Waiting"]);
+      assert.equal(sessionQueueTitles(document)[0], "Blue Hour");
+      assert.equal(document.activeElement, announcement);
+      assert.match(announcement.textContent, /Aurora Lines.*Converted.*simulated.*Converted.*no media output/i);
+      assert.equal(completedSessionTitles(document).length, 0);
+
+      await clickView(harness, "converted");
+      assert.deepEqual(completedSessionTitles(document), ["Aurora Lines"]);
+      assert.deepEqual(completedSessionIds(document), ["session-queue:source-aurora:1"]);
+      assert.equal(document.querySelector('section[aria-labelledby="completed-session-heading"] tbody tr')?.getAttribute("data-source-item-id"), "source-aurora");
+      assert.match(document.querySelector('section[aria-labelledby="completed-session-heading"]')?.textContent, /simulated.*no output file/i);
+      assert.equal(document.querySelectorAll('section[aria-labelledby="completed-session-heading"] tbody tr').length, 1);
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Shared Other", "Alpha Other", "Unrelated Track", "Missing Metadata"]);
+      assert.equal(document.querySelector("#result-count")?.textContent, "5 results");
+
+      await setDimension(harness, "artist");
+      await setSecondaryByLabel(harness, "Lead Artist");
+      assert.deepEqual(completedSessionTitles(document), ["Aurora Lines"]);
+      assert.deepEqual(queueTitles(document), ["Shared Lead", "Alpha Other"]);
 
       await clickView(harness, "browser");
       document.querySelector('[data-source-id="source-aurora"]').click();
       await settleRenderer();
       assert.equal(document.querySelector("#session-queue-feedback")?.textContent, "Already in session queue");
       await clickView(harness, "converting");
-      assert.deepEqual(sessionQueueStatuses(document), ["Converted", "Waiting"]);
+      assert.deepEqual(sessionQueueStatuses(document), ["Waiting"]);
       assertRuntimeBoundaries(harness);
     } finally {
       harness.dispose();

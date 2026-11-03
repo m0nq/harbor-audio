@@ -28,6 +28,8 @@ import {
   advanceSessionQueueItem,
   createSessionQueueState,
   insertSessionQueueItem,
+  projectActiveSessionQueueItems,
+  projectCompletedSessionItems,
   type SessionQueueState,
 } from "../domain/session-queue.js";
 import { convertedViewDemoItems } from "../fixtures/converted-filter-fixtures.js";
@@ -148,16 +150,22 @@ function renderSessionQueueAdditions(): string {
   return `
     <section class="queue-card session-queue-additions" aria-labelledby="session-queue-additions-heading">
       <div class="section-heading"><div><h2 id="session-queue-additions-heading">Session queue additions</h2><p>Added during the current session · separate from canonical queue results</p></div><span class="fixture-badge">session only</span></div>
-      <p class="session-queue-note">These fixture records begin at Waiting and advance only by explicit action. Completed items remain here; no media output is created.</p>
-      <p id="session-queue-announcement" class="session-queue-announcement" role="status" aria-live="polite" aria-atomic="true">${escapeHtml(sessionQueueAnnouncement)}</p>
+      <p class="session-queue-note">These fixture records begin at Waiting and advance only by explicit action. Completed items move to Converted for this session; no media output is created.</p>
+      <p id="session-queue-announcement" class="session-queue-announcement" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">${escapeHtml(sessionQueueAnnouncement)}</p>
       <div id="session-queue-results">${renderSessionQueueResults()}</div>
     </section>
   `;
 }
 
 function renderSessionQueueResults(): string {
-  const items = sessionQueueState.items;
-  if (items.length === 0) return `<div class="empty">No session queue items have been added.</div>`;
+  const items = projectActiveSessionQueueItems(sessionQueueState);
+  if (items.length === 0) {
+    const hasCompletedItems = projectCompletedSessionItems(sessionQueueState).length > 0;
+    const message = hasCompletedItems
+      ? "No active session jobs remain. Completed jobs are available in Converted."
+      : "No session queue items have been added.";
+    return `<div class="empty">${message}</div>`;
+  }
 
   return `<table class="queue-table"><caption class="visually-hidden">Session queue additions</caption><thead><tr><th scope="col">Title</th><th scope="col">Creator</th><th scope="col">Collection</th><th scope="col">Duration</th><th scope="col">Status</th><th scope="col">Action</th></tr></thead><tbody>${items.map((item) => renderSessionQueueRow(item)).join("")}</tbody></table>`;
 }
@@ -209,8 +217,14 @@ function renderConvertingResults(items: QueueItem[]): string {
 function renderConvertedQueue(): string {
   const membership = currentConvertedMembership();
   const items = currentConvertedItems(membership);
+  const completedSessionItems = projectCompletedSessionItems(sessionQueueState);
 
   return `
+    <section class="queue-card completed-session" aria-labelledby="completed-session-heading">
+      <div class="section-heading"><div><h2 id="completed-session-heading">Completed this session</h2><p>${completedSessionItems.length} simulated session completion${completedSessionItems.length === 1 ? "" : "s"} · no output files created</p></div><span class="fixture-badge">session only</span></div>
+      <p class="session-queue-note">These records come only from the current simulated session and remain separate from Converted demonstration history.</p>
+      <div id="completed-session-results">${renderCompletedSessionResults(completedSessionItems)}</div>
+    </section>
     <div class="section-heading"><div><h2>Converted</h2><p>${convertedViewDemoItems.length} synthetic demonstration tracks · no media conversion occurred</p></div><span class="fixture-badge">synthetic demo</span></div>
     <section class="queue-card" aria-label="Converted demonstration fixture list">
       <div class="queue-toolbar converted-toolbar">
@@ -224,6 +238,14 @@ function renderConvertedQueue(): string {
       <div id="queue-results">${renderConvertedResults(items, membership.length)}</div>
     </section>
   `;
+}
+
+function renderCompletedSessionResults(items: readonly SessionQueueState["items"][number][]): string {
+  if (items.length === 0) {
+    return `<div class="empty completed-session-empty">No session jobs have completed in this session.</div>`;
+  }
+
+  return `<table class="queue-table completed-session-table"><caption class="visually-hidden">Completed this session</caption><thead><tr><th scope="col">Title</th><th scope="col">Creator</th><th scope="col">Collection</th><th scope="col">Duration</th><th scope="col">Status</th><th scope="col">Output</th></tr></thead><tbody>${items.map((item) => `<tr data-session-queue-id="${escapeHtml(item.id)}" data-source-item-id="${escapeHtml(item.sourceItemId)}"><td>${escapeHtml(item.title)}</td><td>${escapeHtml(item.creator)}</td><td>${escapeHtml(item.collection)}</td><td>${escapeHtml(item.duration)}</td><td><span class="status converted">Converted</span><small>Simulated completion</small></td><td>Simulated only; no output file was created.</td></tr>`).join("")}</tbody></table>`;
 }
 
 function renderDimensionOptions(): string {
@@ -473,12 +495,18 @@ function wireSessionQueueControls(): void {
       if (result.kind === "unknown-id" || result.kind === "terminal") return;
 
       sessionQueueState = result.state;
-      sessionQueueAnnouncement = `${result.item.title} is now ${formatStatusLabel(result.item.status)} in the simulated session queue; no media output was created.`;
+      sessionQueueAnnouncement = result.item.status === "converted"
+        ? `${result.item.title} reached Converted in the simulated session; it is available in Converted. No media output was created.`
+        : `${result.item.title} is now ${formatStatusLabel(result.item.status)} in the simulated session queue; no media output was created.`;
       updateSessionQueueResults();
 
-      [...document.querySelectorAll<HTMLButtonElement>("[data-session-queue-id]")]
-        .find((nextButton) => nextButton.dataset.sessionQueueId === sessionQueueItemId)
-        ?.focus();
+      if (result.item.status === "converted") {
+        document.querySelector<HTMLParagraphElement>("#session-queue-announcement")?.focus();
+      } else {
+        [...document.querySelectorAll<HTMLButtonElement>("[data-session-queue-id]")]
+          .find((nextButton) => nextButton.dataset.sessionQueueId === sessionQueueItemId)
+          ?.focus();
+      }
     });
   });
 }
