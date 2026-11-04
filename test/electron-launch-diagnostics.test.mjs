@@ -27,7 +27,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   const diagnostics = {
     artifactsDir,
     launchError: {
-      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic",
+      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2",
       apiKey: "raw-api-key",
     },
   };
@@ -39,7 +39,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   assert.match(contents, /token=\[REDACTED\]/);
   assert.match(contents, /"apiKey": "\[REDACTED\]"/);
   assert.match(contents, /Authorization: \[REDACTED\]/);
-  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-api-key/);
+  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|raw-api-key/);
 });
 
 test("labels Playwright PID observations as unverified and parses ANSI log markers", () => {
