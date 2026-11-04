@@ -27,7 +27,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   const diagnostics = {
     artifactsDir,
     launchError: {
-      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2",
+      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2; Authorization: Digest username=alice, realm=secret, nonce=raw; https://example.test/?token=url-token",
       apiKey: "raw-api-key",
     },
   };
@@ -35,11 +35,11 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   const diagnosticsPath = await persistDiagnostics(diagnostics);
   const contents = await readFile(diagnosticsPath, "utf8");
 
-  assert.match(contents, /Authorization: Bearer \[REDACTED\]/);
+  assert.match(contents, /Authorization: \[REDACTED\]/);
   assert.match(contents, /token=\[REDACTED\]/);
   assert.match(contents, /"apiKey": "\[REDACTED\]"/);
   assert.match(contents, /Authorization: \[REDACTED\]/);
-  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|raw-api-key/);
+  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|secret|nonce=raw|url-token|raw-api-key/);
 });
 
 test("labels Playwright PID observations as unverified and parses ANSI log markers", () => {
@@ -140,6 +140,28 @@ test("persistence failure retains the profile after an otherwise successful call
   assert.equal(result.persistenceError.message, "diagnostic disk failure");
   assert.equal(result.removedProfile, false);
   assert.equal(removed, false);
+});
+
+test("profile-removal failure is persisted before the profile is retained", async () => {
+  const writes = [];
+  const result = await finalizeDiagnostics({
+    diagnostics: diagnosticsFixture(),
+    passed: true,
+    profileRoot: "/tmp/harbor-profile",
+    persist: async (diagnostics) => {
+      diagnostics.diagnosticsPath = "/tmp/diagnostics.json";
+      writes.push(JSON.stringify(diagnostics));
+      return diagnostics.diagnosticsPath;
+    },
+    removeProfile: async () => {
+      throw new Error("profile removal failed");
+    },
+  });
+
+  assert.equal(result.removedProfile, false);
+  assert.equal(result.cleanupErrors.length, 1);
+  assert.equal(writes.length, 2);
+  assert.match(writes[1], /profile removal failed/);
 });
 
 test("primary failure remains the cause when cleanup and persistence also fail", () => {

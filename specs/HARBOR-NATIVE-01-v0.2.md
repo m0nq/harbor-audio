@@ -107,9 +107,10 @@ scope without expanding native acceptance:
 - AC-07 — perform an independent Loop 3 review and leave human merge as a
   separate decision.
 - AC-08 — preserve primary errors and unrelated branches/files, including the
-  primary checkout `/Users/archimedes/Projects/harbor-audio` at
+  primary checkout `<repository-root>` at
   `07dc10b47dc2c4def5a86a0e74fbcd50ac607c39` and its unrelated untracked
-  `.github/workflows/ci.yml`; governance PR #1 at
+  `.github/workflows/ci.yml`; the machine-specific path belongs in run evidence,
+  not committed specification text. Governance PR #1 at
   `213bcc2640b53c1ab39c26f0aa79b71986a52c31`; duration PR #2 at
   `472bba8177309b2a56c8d9283532866aa2a11d42`; and session PR #3 at
   `51b7580ac26b670309425b78bafaa6ad80ed3fb5`. Do not modify or merge those

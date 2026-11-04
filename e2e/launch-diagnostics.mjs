@@ -6,7 +6,7 @@ export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
 const SENSITIVE_ASSIGNMENT_PATTERN = /(\b(?:cookie|password|passphrase|secret|token|api[_-]?key)\b\s*[:=]\s*)([^\s,;]+)/gi;
-const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)([^\s,;]+(?:\s+[^\s,;]+)?)/gi;
+const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 
 function errorMessage(error) {
@@ -17,11 +17,7 @@ export function sanitizeDiagnosticsText(value) {
   return String(value)
     .replace(ANSI_ESCAPE_PATTERN, "")
     .replace(BEARER_PATTERN, "$1[REDACTED]")
-    .replace(AUTHORIZATION_PATTERN, (match, prefix, authorizationValue) => (
-      /^Bearer\s+\[REDACTED\]$/i.test(authorizationValue.trim())
-        ? `${prefix}${authorizationValue}`
-        : `${prefix}[REDACTED]`
-    ))
+    .replace(AUTHORIZATION_PATTERN, "$1[REDACTED]")
     .replace(SENSITIVE_ASSIGNMENT_PATTERN, (match, prefix) => `${prefix}[REDACTED]`);
 }
 
@@ -147,6 +143,15 @@ export async function finalizeDiagnostics({
     ?? path.join(diagnostics.artifactsDir, "electron-e2e-diagnostics.json");
   let removedProfile = false;
 
+  const persistCurrentDiagnostics = async () => {
+    try {
+      diagnosticsPath = await persist(diagnostics);
+    } catch (error) {
+      persistenceError ??= error;
+      recordDiagnosticError(diagnostics, error);
+    }
+  };
+
   if (electronApp) {
     diagnostics.cleanup.closeRequested = true;
     try {
@@ -195,12 +200,7 @@ export async function finalizeDiagnostics({
     }
   }
 
-  try {
-    diagnosticsPath = await persist(diagnostics);
-  } catch (error) {
-    persistenceError = error;
-    recordDiagnosticError(diagnostics, error);
-  }
+  await persistCurrentDiagnostics();
 
   const cleanupSucceeded = !electronApp || (
     cleanupErrors.length === 0 && diagnostics.cleanup.verifiedExit
@@ -212,6 +212,7 @@ export async function finalizeDiagnostics({
     } catch (error) {
       cleanupErrors.push(error);
       recordDiagnosticError(diagnostics, error);
+      await persistCurrentDiagnostics();
     }
   }
 
