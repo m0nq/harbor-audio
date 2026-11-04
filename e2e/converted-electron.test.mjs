@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { _electron as electron } from "playwright-core";
+import {
+  buildFailureError,
+  errorDiagnostics,
+  finalizeDiagnostics,
+  launchProcessDiagnostics,
+} from "./launch-diagnostics.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const electronPackageRoot = path.join(
@@ -45,64 +51,6 @@ function isolatedEnvironment() {
   return environment;
 }
 
-function diagnosticsText(diagnostics) {
-  return JSON.stringify(diagnostics, null, 2);
-}
-
-function errorDiagnostics(error) {
-  return {
-    name: error instanceof Error ? error.name : "Error",
-    message: error instanceof Error ? error.message : String(error),
-    stack: error instanceof Error ? error.stack : undefined,
-  };
-}
-
-function launchProcessDiagnostics(error) {
-  const text = error instanceof Error ? error.message : String(error);
-  const pidMatch = text.match(/<launched> pid=(\d+)/);
-  if (!pidMatch) return undefined;
-
-  const pid = Number(pidMatch[1]);
-  const exitMatch = text.match(/<process did exit: exitCode=([^,]+), signal=([^)>]+)>/);
-  let liveness = "inaccessible";
-  try {
-    process.kill(pid, 0);
-    liveness = "present";
-  } catch (probeError) {
-    if (probeError?.code === "ESRCH") liveness = "absent";
-  }
-
-  return {
-    pid,
-    exitCode: exitMatch?.[1] ?? undefined,
-    signal: exitMatch?.[2] ?? undefined,
-    liveness,
-  };
-}
-
-async function persistDiagnostics(diagnostics) {
-  const diagnosticsPath = path.join(diagnostics.artifactsDir, "electron-e2e-diagnostics.json");
-  diagnostics.diagnosticsPath = diagnosticsPath;
-  await mkdir(diagnostics.artifactsDir, { recursive: true });
-  await writeFile(diagnosticsPath, diagnosticsText(diagnostics), "utf8");
-  return diagnosticsPath;
-}
-
-function waitForProcessExit(child, timeout = timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Electron child process did not exit within ${timeout}ms`));
-    }, timeout);
-
-    child.once("close", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
-
 async function withElectronLaunch(scenario, callback) {
   const profileRoot = await mkdtemp(path.join(os.tmpdir(), "audfree-electron-e2e-"));
   const requestedUserDataDir = path.join(profileRoot, "user-data");
@@ -122,7 +70,8 @@ async function withElectronLaunch(scenario, callback) {
     processExit: undefined,
     launchError: undefined,
     cleanup: {
-      ownership: "playwright-child-handle",
+      ownership: "not-established",
+      ownershipSource: "none",
       closeRequested: false,
       directChildPid: undefined,
       launchProcess: undefined,
@@ -134,7 +83,7 @@ async function withElectronLaunch(scenario, callback) {
   let page;
   let child;
   let passed = false;
-  let cleanupError;
+  let primaryError;
 
   try {
     electronApp = await electron.launch({
@@ -147,8 +96,11 @@ async function withElectronLaunch(scenario, callback) {
     });
     child = electronApp.process();
     diagnostics.cleanup.directChildPid = child.pid;
+    diagnostics.cleanup.ownership = "playwright-child-handle";
+    diagnostics.cleanup.ownershipSource = "electronApp.process()";
     child.on("error", (error) => {
-      diagnostics.processErrors.push(error.stack ?? error.message);
+      const details = errorDiagnostics(error);
+      diagnostics.processErrors.push(details.stack ?? details.message);
     });
     child.on("exit", (code, signal) => {
       diagnostics.processExit = { code, signal };
@@ -192,48 +144,29 @@ async function withElectronLaunch(scenario, callback) {
 
     passed = true;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    primaryError = error;
     diagnostics.launchError = errorDiagnostics(error);
     diagnostics.cleanup.launchProcess = launchProcessDiagnostics(error);
-    if (diagnostics.cleanup.launchProcess?.liveness === "absent") {
-      diagnostics.cleanup.verifiedExit = true;
+    if (!electronApp) {
+      diagnostics.cleanup.ownership = diagnostics.cleanup.launchProcess.ownership;
+      diagnostics.cleanup.ownershipSource = "playwright-error-log";
     }
-    throw new Error(`${message}\nElectron E2E diagnostics: ${diagnostics.artifactsDir}/electron-e2e-diagnostics.json`, {
-      cause: error,
-    });
   } finally {
-    if (electronApp) {
-      diagnostics.cleanup.closeRequested = true;
-      try {
-        await electronApp.close();
-      } catch (error) {
-        cleanupError = error;
-        diagnostics.processErrors.push(error instanceof Error ? error.message : String(error));
-      }
-      if (child && child.exitCode === null && child.signalCode === null) {
-        try {
-          await waitForProcessExit(child);
-        } catch (error) {
-          cleanupError ??= error;
-          diagnostics.processErrors.push(error instanceof Error ? error.message : String(error));
-          if (child.exitCode === null && child.signalCode === null) {
-            diagnostics.cleanup.killAttempted = true;
-            child.kill();
-          }
-        }
-      }
-      if (child && child.exitCode === null && child.signalCode === null) {
-        diagnostics.cleanup.killAttempted = true;
-        child.kill();
-      }
-      diagnostics.cleanup.verifiedExit = Boolean(
-        child && (child.exitCode !== null || child.signalCode !== null),
-      );
-    }
-
-    await persistDiagnostics(diagnostics);
-    if (passed) await rm(profileRoot, { recursive: true, force: true });
-    if (cleanupError) throw cleanupError;
+    const finalization = await finalizeDiagnostics({
+      diagnostics,
+      electronApp,
+      child,
+      passed,
+      profileRoot,
+      timeout: timeoutMs,
+    });
+    const finalError = buildFailureError({
+      primaryError,
+      diagnosticsPath: finalization.diagnosticsPath,
+      cleanupErrors: finalization.cleanupErrors,
+      persistenceError: finalization.persistenceError,
+    });
+    if (finalError) throw finalError;
   }
 }
 

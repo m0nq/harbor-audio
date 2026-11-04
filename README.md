@@ -93,8 +93,12 @@ Run the isolated Electron E2E suite from a macOS desktop session:
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only
-processes and profiles owned by the test. Failed diagnostics may be retained
-for review.
+processes and profiles owned by the test. Diagnostics are sanitized before
+persistence. The harness removes a profile only after a passing callback,
+verified child exit, and successful diagnostic persistence; failed or uncertain
+cleanup retains the profile and diagnostic path for review. A pre-renderer
+launch abort remains native acceptance HOLD rather than an application-test
+failure or a native pass.
 
 In a fresh exact-pinned dependency tree, Electron 44 may have package metadata
 without its native bundle until the package is required. Treat native artifact

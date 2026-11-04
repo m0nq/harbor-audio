@@ -72,6 +72,44 @@ The possible duplicate completion-announcement behavior remains an Observation
 until actual assistive-technology evidence establishes its impact. Unperformed
 or blocked manual checks remain unverified and require explicit risk disposition.
 
+## Approved Linear contract traceability
+
+CLO-160 is the authority for the approved HARBOR-NATIVE-01 v0.2 acceptance
+contract. The following traceability preserves the approved AC-01 through AC-08
+scope without expanding native acceptance:
+
+- AC-01 — record exact worktree, base and tested HEAD SHAs, changed files and
+  status; the physical Electron executable path, architecture, UUID, and
+  SHA-256; package and lockfile hashes; Node, pnpm, Electron, Playwright, and
+  macOS versions; environment and invocation; isolated profiles; commands,
+  counts, logs, cleanup results, and the exact dependency artifact. Treat
+  pre-renderer aborts as runtime/harness evidence, not independent application
+  defects.
+- AC-02 — keep SIGABRT analysis bounded to the observed execution context and
+  hypotheses; do not bypass security, change global settings, add providers,
+  credentials, network behavior, or unrelated application capability.
+- AC-03 — use unique test-owned userData/sessionData and restrictive artifact
+  handling; record ownership evidence; sanitize diagnostics; handle early
+  launch cleanup; never use broad deletion or process termination; retain
+  diagnostics and profiles after failed or uncertain cleanup; remove artifacts
+  only after confirmed successful cleanup and distinguish configured from
+  verified state.
+- AC-04 — run the exact-revision typecheck, build, Node/JSDOM, applicable native
+  E2E, and diff checks, record available workflow evidence, and keep native
+  pre-renderer failure as HOLD. Do not add application capability to repair the
+  harness lane.
+- AC-05 — keep physical keyboard and VoiceOver checks separate, recording focus,
+  native control, semantic, status, announcement, duplicate-speech, and empty
+  state evidence. Simulated key events and JSDOM do not substitute for either
+  manual lane.
+- AC-06 — honor the authorized local-only scope and do not access credentials,
+  real accounts, personal profiles, or unrelated data.
+- AC-07 — perform an independent Loop 3 review and leave human merge as a
+  separate decision.
+- AC-08 — preserve primary errors and unrelated branches/files; stop when
+  provenance, scope, safety, or required evidence diverges, and report bounded
+  conclusions rather than implying unavailable native evidence is a pass.
+
 ## Evidence and disposition
 
 Evidence distinguishes reference observation, fixture simulation, source
