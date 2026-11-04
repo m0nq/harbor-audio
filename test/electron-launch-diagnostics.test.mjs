@@ -27,7 +27,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   const diagnostics = {
     artifactsDir,
     launchError: {
-      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2; Authorization: Digest username=alice, realm=secret, nonce=raw; access_token=raw-access; refresh_token=raw-refresh; client_secret=raw-secret; password: raw secret phrase; https://example.test/?token=url-token",
+      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2; Authorization: Digest username=alice, realm=secret, nonce=raw; access_token=raw-access; refresh_token=raw-refresh; client_secret=raw-secret; oauth_access_token=raw-oauth; db_client_secret=raw-db; authorization_token=raw-auth; password: raw secret phrase; https://example.test/?token=url-token",
       apiKey: "raw-api-key",
     },
   };
@@ -39,7 +39,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   assert.match(contents, /token=\[REDACTED\]/);
   assert.match(contents, /"apiKey": "\[REDACTED\]"/);
   assert.match(contents, /Authorization: \[REDACTED\]/);
-  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|realm=secret|nonce=raw|raw-access|raw-refresh|raw-secret|secret phrase|url-token|raw-api-key/);
+  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|realm=secret|nonce=raw|raw-access|raw-refresh|raw-secret|raw-oauth|raw-db|raw-auth|secret phrase|url-token|raw-api-key/);
 });
 
 test("labels Playwright PID observations as unverified and parses ANSI log markers", () => {
