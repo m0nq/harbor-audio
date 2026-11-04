@@ -106,9 +106,20 @@ scope without expanding native acceptance:
   real accounts, personal profiles, or unrelated data.
 - AC-07 — perform an independent Loop 3 review and leave human merge as a
   separate decision.
-- AC-08 — preserve primary errors and unrelated branches/files; stop when
-  provenance, scope, safety, or required evidence diverges, and report bounded
-  conclusions rather than implying unavailable native evidence is a pass.
+- AC-08 — preserve primary errors and unrelated branches/files, including the
+  primary checkout `/Users/archimedes/Projects/harbor-audio` at
+  `07dc10b47dc2c4def5a86a0e74fbcd50ac607c39` and its unrelated untracked
+  `.github/workflows/ci.yml`; governance PR #1 at
+  `213bcc2640b53c1ab39c26f0aa79b71986a52c31`; duration PR #2 at
+  `472bba8177309b2a56c8d9283532866aa2a11d42`; and session PR #3 at
+  `51b7580ac26b670309425b78bafaa6ad80ed3fb5`. Do not modify or merge those
+  worktrees or PRs, and keep overlapping changes as a separate integration
+  decision. Stop on unauthorized native context or permissions, sandbox denial,
+  unsafe worktree, new dependency/version, signing/OS/global security change,
+  new app network/media/provider/credential capability, major architecture
+  expansion, destructive Git, persistent unresolvable checks, diagnostic
+  stagnation, or merge. Report bounded conclusions rather than implying
+  unavailable native evidence is a pass.
 
 ## Evidence and disposition
 
