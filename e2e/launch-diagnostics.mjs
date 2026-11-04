@@ -1,13 +1,31 @@
-import { mkdir as defaultMkdir, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFile as defaultExecFile } from "node:child_process";
+import { mkdir as defaultMkdir, readFile as defaultReadFile, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
 import path from "node:path";
+import { promisify } from "node:util";
 
 export const DEFAULT_PROCESS_EXIT_TIMEOUT_MS = 15_000;
 export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
-const SENSITIVE_ASSIGNMENT_PATTERN = /(["']?(?:(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*)["']?\s*[:=]\s*)[^\r\n;,]*/gi;
+const SENSITIVE_NAME_PATTERN = "(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*";
+const SENSITIVE_ASSIGNMENT_PREFIX = "(\\b" + SENSITIVE_NAME_PATTERN + "\\b\\s*[:=]\\s*)";
+const DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
+  SENSITIVE_ASSIGNMENT_PREFIX + '("[^"]*")',
+  "gi",
+);
+const SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
+  SENSITIVE_ASSIGNMENT_PREFIX + "('[^']*')",
+  "gi",
+);
+const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
+  SENSITIVE_ASSIGNMENT_PREFIX + "(?![\"'])([^\\r\\n;]*)(?=;|$)",
+  "gi",
+);
 const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
+const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+(?:basic|bearer|digest|token)\s+)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
+const execFile = promisify(defaultExecFile);
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
@@ -16,9 +34,13 @@ function errorMessage(error) {
 export function sanitizeDiagnosticsText(value) {
   return String(value)
     .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN, '$1"[REDACTED]"')
+    .replace(SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN, "$1'[REDACTED]'")
+    .replace(UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN, "$1[REDACTED]")
     .replace(BEARER_PATTERN, "$1[REDACTED]")
+    .replace(AUTHORIZATION_SCHEME_PATTERN, "$1[REDACTED]")
     .replace(AUTHORIZATION_PATTERN, "$1[REDACTED]")
-    .replace(SENSITIVE_ASSIGNMENT_PATTERN, (match, prefix) => `${prefix}[REDACTED]`);
+    .replace(/\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi, "$1[REDACTED]");
 }
 
 export function sanitizeDiagnosticsValue(value, key = "") {
@@ -38,6 +60,162 @@ export function sanitizeDiagnosticsValue(value, key = "") {
 
 export function diagnosticsText(diagnostics) {
   return JSON.stringify(sanitizeDiagnosticsValue(diagnostics), null, 2);
+}
+
+function commandError(command, args, error) {
+  return `${command} ${args.join(" ")}: ${sanitizeDiagnosticsText(errorMessage(error))}`;
+}
+
+async function runCommand(command, args, cwd, execFileFn) {
+  try {
+    const result = await execFileFn(command, args, {
+      cwd,
+      maxBuffer: 1024 * 1024,
+    });
+    return { value: result.stdout.trim() };
+  } catch (error) {
+    return { error: commandError(command, args, error) };
+  }
+}
+
+function sha256(buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+function firstMatch(value, pattern) {
+  return value?.match(pattern)?.[1];
+}
+
+export async function collectRunProvenance({
+  repoRoot,
+  electronExecutable,
+  electronPackageJson,
+  playwrightPackageJson,
+  baseRef,
+  command = process.argv,
+  execFileFn = execFile,
+  readFileFn = defaultReadFile,
+} = {}) {
+  const errors = [];
+  const commandResult = async (commandName, args) => {
+    const result = await runCommand(commandName, args, repoRoot, execFileFn);
+    if (result.error) errors.push(result.error);
+    return result.value;
+  };
+  const resolvedBaseRef = baseRef
+    ?? process.env.HARBOR_NATIVE_BASE_REF
+    ?? (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
+  const headSha = await commandResult("git", ["rev-parse", "HEAD"]);
+  const baseSha = await commandResult("git", ["rev-parse", "--verify", `${resolvedBaseRef}^{commit}`]);
+  const changedFilesText = baseSha
+    ? await commandResult("git", ["diff", "--name-only", `${resolvedBaseRef}...HEAD`])
+    : undefined;
+  const repositoryStatus = await commandResult("git", ["status", "--short", "--branch"]);
+  const pnpmVersion = await commandResult("pnpm", ["--version"]);
+  const macOSVersion = await commandResult("sw_vers", ["-productVersion"]);
+  const architecture = await commandResult("uname", ["-m"]);
+  const electronFileDescription = await commandResult("file", [electronExecutable]);
+  const electronLoadCommands = await commandResult("otool", ["-l", electronExecutable]);
+
+  const files = [
+    ["electronExecutable", electronExecutable],
+    ["electronPackageJson", electronPackageJson],
+    ["playwrightPackageJson", playwrightPackageJson],
+    ["packageJson", path.join(repoRoot, "package.json")],
+    ["lockfile", path.join(repoRoot, "pnpm-lock.yaml")],
+  ];
+  const hashes = {};
+  for (const [name, filePath] of files) {
+    try {
+      hashes[name] = sha256(await readFileFn(filePath));
+    } catch (error) {
+      errors.push("sha256 " + name + ": " + sanitizeDiagnosticsText(errorMessage(error)));
+    }
+  }
+
+  let electronVersion;
+  let playwrightVersion;
+  for (const [name, filePath] of [
+    ["electronVersion", electronPackageJson],
+    ["playwrightVersion", playwrightPackageJson],
+  ]) {
+    try {
+      const packageJson = JSON.parse(await readFileFn(filePath, "utf8"));
+      if (name === "electronVersion") electronVersion = packageJson.version;
+      if (name === "playwrightVersion") playwrightVersion = packageJson.version;
+    } catch (error) {
+      errors.push("package metadata " + name + ": " + sanitizeDiagnosticsText(errorMessage(error)));
+    }
+  }
+
+  const electronUuid = firstMatch(electronLoadCommands, /cmd LC_UUID[\s\S]*?uuid ([A-F0-9-]+)/i);
+  const electronArchitecture = electronFileDescription?.match(/\b(arm64|x86_64|i386)\b/i)?.[1];
+  const changedFiles = changedFilesText === undefined
+    ? undefined
+    : changedFilesText.split("\n").filter(Boolean);
+  const required = [
+    headSha,
+    baseSha,
+    repositoryStatus,
+    pnpmVersion,
+    macOSVersion,
+    architecture,
+    electronFileDescription,
+    electronUuid,
+    electronArchitecture,
+    hashes.electronExecutable,
+    hashes.electronPackageJson,
+    hashes.playwrightPackageJson,
+    hashes.packageJson,
+    hashes.lockfile,
+    electronVersion,
+    playwrightVersion,
+    changedFiles,
+  ];
+
+  return {
+    status: errors.length === 0 && required.every((value) => value !== undefined),
+    worktree: repoRoot,
+    baseRef: resolvedBaseRef,
+    baseSha,
+    headSha,
+    changedFiles,
+    repositoryStatus,
+    invocation: {
+      command,
+      cwd: process.cwd(),
+      nodeExecutable: process.execPath,
+      electronOverridesRemoved: [
+        "ELECTRON_CACHE",
+        "ELECTRON_MIRROR",
+        "ELECTRON_OVERRIDE_DIST_PATH",
+        "ELECTRON_RUN_AS_NODE",
+        "NPM_CONFIG_ELECTRON_MIRROR",
+        "npm_config_electron_mirror",
+      ],
+    },
+    toolchain: {
+      node: process.version,
+      pnpm: pnpmVersion,
+      macOS: macOSVersion,
+      hostArchitecture: architecture,
+      electron: electronVersion,
+      playwright: playwrightVersion,
+    },
+    artifact: {
+      executable: electronExecutable,
+      architecture: electronArchitecture,
+      uuid: electronUuid,
+      sha256: hashes.electronExecutable,
+      electronVersion,
+      playwrightVersion,
+      packageJsonSha256: hashes.electronPackageJson,
+      playwrightPackageJsonSha256: hashes.playwrightPackageJson,
+      repositoryPackageJsonSha256: hashes.packageJson,
+      lockfileSha256: hashes.lockfile,
+    },
+    errors,
+  };
 }
 
 export function errorDiagnostics(error) {
@@ -205,12 +383,15 @@ export async function finalizeDiagnostics({
   const cleanupSucceeded = !electronApp || (
     cleanupErrors.length === 0 && diagnostics.cleanup.verifiedExit
   );
+  if (passed && !cleanupSucceeded) diagnostics.disposition = "CLEANUP_FAILURE";
+  if (cleanupErrors.length > 0 || persistenceError) await persistCurrentDiagnostics();
   if (passed && cleanupSucceeded && !persistenceError) {
     try {
       await removeProfile(profileRoot, { recursive: true, force: true });
       removedProfile = true;
     } catch (error) {
       cleanupErrors.push(error);
+      diagnostics.disposition = "CLEANUP_FAILURE";
       recordDiagnosticError(diagnostics, error);
       await persistCurrentDiagnostics();
     }

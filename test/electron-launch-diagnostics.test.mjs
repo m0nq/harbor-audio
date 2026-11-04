@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import {
   buildFailureError,
+  collectRunProvenance,
   finalizeDiagnostics,
   launchProcessDiagnostics,
   persistDiagnostics,
+  sanitizeDiagnosticsText,
 } from "../e2e/launch-diagnostics.mjs";
 
 function diagnosticsFixture() {
@@ -40,6 +42,65 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   assert.match(contents, /"apiKey": "\[REDACTED\]"/);
   assert.match(contents, /Authorization: \[REDACTED\]/);
   assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|realm=secret|nonce=raw|raw-access|raw-refresh|raw-secret|raw-oauth|raw-db|raw-auth|secret phrase|url-token|raw-api-key/);
+});
+
+test("redacts complete delimiter and authorization credential forms", () => {
+  const sanitized = sanitizeDiagnosticsText(
+    'token=first,second; password="first;second"; Authorization Basic basic-secret; Authorization Token token-secret',
+  );
+
+  assert.match(sanitized, /token=\[REDACTED\]/);
+  assert.match(sanitized, /password="\[REDACTED\]"/);
+  assert.match(sanitized, /Authorization Basic \[REDACTED\]/);
+  assert.match(sanitized, /Authorization Token \[REDACTED\]/);
+  assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret/);
+});
+
+test("collects exact-head and artifact provenance for retained diagnostics", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "harbor-provenance-test-"));
+  const electronExecutable = path.join(repoRoot, "Electron");
+  const electronPackageJson = path.join(repoRoot, "electron-package.json");
+  const playwrightPackageJson = path.join(repoRoot, "playwright-package.json");
+  await writeFile(electronExecutable, "electron-bytes");
+  await writeFile(electronPackageJson, '{"version":"44.7.0"}');
+  await writeFile(playwrightPackageJson, '{"version":"1.64.1"}');
+  await writeFile(path.join(repoRoot, "package.json"), '{"name":"harbor-audio"}');
+  await writeFile(path.join(repoRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
+  const outputs = new Map([
+    ["git rev-parse HEAD", "58901715f55799243bd0085c9c675665fcc38df4\n"],
+    ["git rev-parse --verify feature/harbor-clo-159^{commit}", "51b7580ac26b670309425b78bafaa6ad80ed3fb5\n"],
+    ["git diff --name-only feature/harbor-clo-159...HEAD", "README.md\ne2e/launch-diagnostics.mjs\n"],
+    ["git status --short --branch", "## mw/harbor-clo-160\n"],
+    ["pnpm --version", "12.12.1\n"],
+    ["sw_vers -productVersion", "26.7.2\n"],
+    ["uname -m", "arm64\n"],
+    [`file ${electronExecutable}`, `${electronExecutable}: Mach-O 64-bit executable arm64\n`],
+    [`otool -l ${electronExecutable}`, "cmd LC_UUID\n    uuid 4C4C44AF-5555-3144-A1E7-7E571B4F50E9\n"],
+  ]);
+
+  const provenance = await collectRunProvenance({
+    repoRoot,
+    electronExecutable,
+    electronPackageJson,
+    playwrightPackageJson,
+    baseRef: "feature/harbor-clo-159",
+    command: ["node", "--test", "e2e/converted-electron.test.mjs"],
+    execFileFn: async (command, args) => ({
+      stdout: outputs.get([command, ...args].join(" ")) ?? "",
+    }),
+  });
+
+  assert.equal(provenance.status, true);
+  assert.equal(provenance.baseSha, "51b7580ac26b670309425b78bafaa6ad80ed3fb5");
+  assert.equal(provenance.headSha, "58901715f55799243bd0085c9c675665fcc38df4");
+  assert.deepEqual(provenance.changedFiles, ["README.md", "e2e/launch-diagnostics.mjs"]);
+  assert.equal(provenance.artifact.architecture, "arm64");
+  assert.equal(provenance.artifact.uuid, "4C4C44AF-5555-3144-A1E7-7E571B4F50E9");
+  assert.equal(provenance.toolchain.electron, "44.7.0");
+  assert.equal(provenance.toolchain.playwright, "1.64.1");
+  assert.match(provenance.artifact.sha256, /^[0-9a-f]{64}$/);
+  assert.equal(provenance.toolchain.pnpm, "12.12.1");
 });
 
 test("labels Playwright PID observations as unverified and parses ANSI log markers", () => {
@@ -144,8 +205,9 @@ test("persistence failure retains the profile after an otherwise successful call
 
 test("profile-removal failure is persisted before the profile is retained", async () => {
   const writes = [];
+  const diagnostics = { ...diagnosticsFixture(), disposition: "PASS" };
   const result = await finalizeDiagnostics({
-    diagnostics: diagnosticsFixture(),
+    diagnostics,
     passed: true,
     profileRoot: "/tmp/harbor-profile",
     persist: async (diagnostics) => {
@@ -162,6 +224,7 @@ test("profile-removal failure is persisted before the profile is retained", asyn
   assert.equal(result.cleanupErrors.length, 1);
   assert.equal(writes.length, 2);
   assert.match(writes[1], /profile removal failed/);
+  assert.equal(diagnostics.disposition, "CLEANUP_FAILURE");
 });
 
 test("primary failure remains the cause when cleanup and persistence also fail", () => {

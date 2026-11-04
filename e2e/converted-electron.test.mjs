@@ -7,6 +7,7 @@ import { test } from "node:test";
 import { _electron as electron } from "playwright-core";
 import {
   buildFailureError,
+  collectRunProvenance,
   errorDiagnostics,
   finalizeDiagnostics,
   launchProcessDiagnostics,
@@ -31,6 +32,15 @@ const sessionQueueRowsSelector =
   'section[aria-labelledby="session-queue-additions-heading"] tbody tr';
 const completedSessionRowsSelector =
   'section[aria-labelledby="completed-session-heading"] tbody tr';
+const runProvenance = await collectRunProvenance({
+  repoRoot,
+  electronExecutable,
+  electronPackageJson: path.join(electronPackageRoot, "package.json"),
+  playwrightPackageJson: path.join(
+    repoRoot,
+    "node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
+  ),
+});
 
 function isolatedEnvironment() {
   const environment = Object.fromEntries(
@@ -60,6 +70,7 @@ async function withElectronLaunch(scenario, callback) {
 
   const diagnostics = {
     scenario,
+    provenance: runProvenance,
     profileRoot,
     userDataDir,
     artifactsDir,
@@ -69,6 +80,8 @@ async function withElectronLaunch(scenario, callback) {
     processErrors: [],
     processExit: undefined,
     launchError: undefined,
+    startupPhase: "prelaunch",
+    disposition: "UNDETERMINED",
     cleanup: {
       ownership: "not-established",
       ownershipSource: "none",
@@ -86,6 +99,12 @@ async function withElectronLaunch(scenario, callback) {
   let primaryError;
 
   try {
+    if (!runProvenance.status) {
+      diagnostics.startupPhase = "provenance-gate";
+      diagnostics.disposition = "HOLD";
+      throw new Error("Native run provenance is incomplete; refusing Electron launch");
+    }
+    diagnostics.startupPhase = "electron-launch";
     electronApp = await electron.launch({
       executablePath: electronExecutable,
       args: [`--user-data-dir=${userDataDir}`, repoRoot],
@@ -94,6 +113,7 @@ async function withElectronLaunch(scenario, callback) {
       env: isolatedEnvironment(),
       timeout: timeoutMs,
     });
+    diagnostics.startupPhase = "electron-started";
     child = electronApp.process();
     diagnostics.cleanup.directChildPid = child.pid;
     diagnostics.cleanup.ownership = "playwright-child-handle";
@@ -117,6 +137,7 @@ async function withElectronLaunch(scenario, callback) {
     });
 
     page = await electronApp.firstWindow({ timeout: timeoutMs });
+    diagnostics.startupPhase = "renderer-started";
     page.setDefaultTimeout(timeoutMs);
     page.on("console", (message) => {
       diagnostics.pageConsole.push(`${message.type()}: ${message.text()}`);
@@ -143,13 +164,28 @@ async function withElectronLaunch(scenario, callback) {
     await callback({ electronApp, page });
 
     passed = true;
+    diagnostics.startupPhase = "application-workflow";
+    diagnostics.disposition = "PASS";
   } catch (error) {
     primaryError = error;
     diagnostics.launchError = errorDiagnostics(error);
     diagnostics.cleanup.launchProcess = launchProcessDiagnostics(error);
     if (!electronApp) {
-      diagnostics.cleanup.ownership = diagnostics.cleanup.launchProcess.ownership;
-      diagnostics.cleanup.ownershipSource = "playwright-error-log";
+      if (diagnostics.disposition === "UNDETERMINED") diagnostics.disposition = "HOLD";
+      if (diagnostics.startupPhase === "electron-launch") diagnostics.startupPhase = "pre-renderer-launch";
+      if (diagnostics.startupPhase === "provenance-gate") {
+        diagnostics.cleanup.ownership = "not-established";
+        diagnostics.cleanup.ownershipSource = "provenance-gate";
+      } else {
+        diagnostics.cleanup.ownership = diagnostics.cleanup.launchProcess.ownership;
+        diagnostics.cleanup.ownershipSource = "playwright-error-log";
+      }
+    } else if (!page) {
+      diagnostics.disposition = "HOLD";
+      diagnostics.startupPhase = "renderer-startup";
+    } else {
+      diagnostics.disposition = "FAILURE";
+      diagnostics.startupPhase = "application-workflow";
     }
   } finally {
     const finalization = await finalizeDiagnostics({
