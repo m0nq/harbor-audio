@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,6 +49,45 @@ function diagnosticsText(diagnostics) {
   return JSON.stringify(diagnostics, null, 2);
 }
 
+function errorDiagnostics(error) {
+  return {
+    name: error instanceof Error ? error.name : "Error",
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : undefined,
+  };
+}
+
+function launchProcessDiagnostics(error) {
+  const text = error instanceof Error ? error.message : String(error);
+  const pidMatch = text.match(/<launched> pid=(\d+)/);
+  if (!pidMatch) return undefined;
+
+  const pid = Number(pidMatch[1]);
+  const exitMatch = text.match(/<process did exit: exitCode=([^,]+), signal=([^)>]+)>/);
+  let liveness = "inaccessible";
+  try {
+    process.kill(pid, 0);
+    liveness = "present";
+  } catch (probeError) {
+    if (probeError?.code === "ESRCH") liveness = "absent";
+  }
+
+  return {
+    pid,
+    exitCode: exitMatch?.[1] ?? undefined,
+    signal: exitMatch?.[2] ?? undefined,
+    liveness,
+  };
+}
+
+async function persistDiagnostics(diagnostics) {
+  const diagnosticsPath = path.join(diagnostics.artifactsDir, "electron-e2e-diagnostics.json");
+  diagnostics.diagnosticsPath = diagnosticsPath;
+  await mkdir(diagnostics.artifactsDir, { recursive: true });
+  await writeFile(diagnosticsPath, diagnosticsText(diagnostics), "utf8");
+  return diagnosticsPath;
+}
+
 function waitForProcessExit(child, timeout = timeoutMs) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
 
@@ -81,11 +120,21 @@ async function withElectronLaunch(scenario, callback) {
     pageErrors: [],
     processErrors: [],
     processExit: undefined,
+    launchError: undefined,
+    cleanup: {
+      ownership: "playwright-child-handle",
+      closeRequested: false,
+      directChildPid: undefined,
+      launchProcess: undefined,
+      killAttempted: false,
+      verifiedExit: false,
+    },
   };
   let electronApp;
   let page;
   let child;
   let passed = false;
+  let cleanupError;
 
   try {
     electronApp = await electron.launch({
@@ -97,6 +146,7 @@ async function withElectronLaunch(scenario, callback) {
       timeout: timeoutMs,
     });
     child = electronApp.process();
+    diagnostics.cleanup.directChildPid = child.pid;
     child.on("error", (error) => {
       diagnostics.processErrors.push(error.stack ?? error.message);
     });
@@ -143,30 +193,47 @@ async function withElectronLaunch(scenario, callback) {
     passed = true;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${message}\nElectron E2E diagnostics:\n${diagnosticsText(diagnostics)}`, {
+    diagnostics.launchError = errorDiagnostics(error);
+    diagnostics.cleanup.launchProcess = launchProcessDiagnostics(error);
+    if (diagnostics.cleanup.launchProcess?.liveness === "absent") {
+      diagnostics.cleanup.verifiedExit = true;
+    }
+    throw new Error(`${message}\nElectron E2E diagnostics: ${diagnostics.artifactsDir}/electron-e2e-diagnostics.json`, {
       cause: error,
     });
   } finally {
     if (electronApp) {
+      diagnostics.cleanup.closeRequested = true;
       try {
         await electronApp.close();
-      } finally {
-        if (child && child.exitCode === null && child.signalCode === null) {
-          try {
-            await waitForProcessExit(child);
-          } catch (error) {
-            if (!passed) {
-              diagnostics.processErrors.push(error instanceof Error ? error.message : String(error));
-            }
-            if (child.exitCode === null && child.signalCode === null) child.kill();
-            throw error;
+      } catch (error) {
+        cleanupError = error;
+        diagnostics.processErrors.push(error instanceof Error ? error.message : String(error));
+      }
+      if (child && child.exitCode === null && child.signalCode === null) {
+        try {
+          await waitForProcessExit(child);
+        } catch (error) {
+          cleanupError ??= error;
+          diagnostics.processErrors.push(error instanceof Error ? error.message : String(error));
+          if (child.exitCode === null && child.signalCode === null) {
+            diagnostics.cleanup.killAttempted = true;
+            child.kill();
           }
         }
-        if (child && child.exitCode === null && child.signalCode === null) child.kill();
       }
+      if (child && child.exitCode === null && child.signalCode === null) {
+        diagnostics.cleanup.killAttempted = true;
+        child.kill();
+      }
+      diagnostics.cleanup.verifiedExit = Boolean(
+        child && (child.exitCode !== null || child.signalCode !== null),
+      );
     }
 
+    await persistDiagnostics(diagnostics);
     if (passed) await rm(profileRoot, { recursive: true, force: true });
+    if (cleanupError) throw cleanupError;
   }
 }
 
