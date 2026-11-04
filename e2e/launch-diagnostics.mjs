@@ -100,7 +100,7 @@ function isSha(value, length) {
 }
 
 function isVersion(value) {
-  return typeof value === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
+  return typeof value === "string" && /^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
 }
 
 export async function collectRunProvenance({

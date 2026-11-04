@@ -84,7 +84,7 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
     ["git diff --name-only feature/harbor-clo-159...HEAD", "README.md\ne2e/launch-diagnostics.mjs\n"],
     ["git status --short --branch", "## mw/harbor-clo-160\n"],
     ["pnpm --version", "12.12.1\n"],
-    ["sw_vers -productVersion", "26.7.2\n"],
+    ["sw_vers -productVersion", "15.0\n"],
     ["uname -m", "arm64\n"],
     [`file ${electronExecutable}`, `${electronExecutable}: Mach-O 64-bit executable arm64\n`],
     [`otool -l ${electronExecutable}`, "cmd LC_UUID\n    uuid 4C4C44AF-5555-3144-A1E7-7E571B4F50E9\n"],
