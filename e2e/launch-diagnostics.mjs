@@ -14,6 +14,10 @@ const DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   SENSITIVE_ASSIGNMENT_PREFIX + '("[^"]*")',
   "gi",
 );
+const JSON_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
+  '((?:\\\\)?"' + SENSITIVE_NAME_PATTERN + '(?:\\\\)?"\\s*:\\s*)(?:\\\\)?"(?:\\\\.|[^"\\\\])*(?:\\\\)?"',
+  "gi",
+);
 const SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   SENSITIVE_ASSIGNMENT_PREFIX + "('[^']*')",
   "gi",
@@ -34,6 +38,7 @@ function errorMessage(error) {
 export function sanitizeDiagnosticsText(value) {
   return String(value)
     .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(JSON_SENSITIVE_ASSIGNMENT_PATTERN, "$1[REDACTED]")
     .replace(DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN, '$1"[REDACTED]"')
     .replace(SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN, "$1'[REDACTED]'")
     .replace(UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN, "$1[REDACTED]")
@@ -84,6 +89,18 @@ function sha256(buffer) {
 
 function firstMatch(value, pattern) {
   return value?.match(pattern)?.[1];
+}
+
+function isNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isSha(value, length) {
+  return typeof value === "string" && new RegExp(`^[0-9a-f]{${length}}$`, "i").test(value);
+}
+
+function isVersion(value) {
+  return typeof value === "string" && /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
 }
 
 export async function collectRunProvenance({
@@ -154,27 +171,32 @@ export async function collectRunProvenance({
     ? undefined
     : changedFilesText.split("\n").filter(Boolean);
   const required = [
-    headSha,
-    baseSha,
-    repositoryStatus,
-    pnpmVersion,
-    macOSVersion,
-    architecture,
-    electronFileDescription,
-    electronUuid,
-    electronArchitecture,
-    hashes.electronExecutable,
-    hashes.electronPackageJson,
-    hashes.playwrightPackageJson,
-    hashes.packageJson,
-    hashes.lockfile,
-    electronVersion,
-    playwrightVersion,
-    changedFiles,
+    ["head SHA", () => isSha(headSha, 40)],
+    ["base SHA", () => isSha(baseSha, 40)],
+    ["repository status", () => isNonEmptyString(repositoryStatus)],
+    ["pnpm version", () => isVersion(pnpmVersion)],
+    ["macOS version", () => isNonEmptyString(macOSVersion)],
+    ["host architecture", () => /^(arm64|x86_64)$/.test(architecture ?? "")],
+    ["Electron file description", () => isNonEmptyString(electronFileDescription)],
+    ["Electron UUID", () => /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i.test(electronUuid ?? "")],
+    ["Electron architecture", () => /^(arm64|x86_64)$/.test(electronArchitecture ?? "")],
+    ["Electron executable SHA-256", () => isSha(hashes.electronExecutable, 64)],
+    ["Electron package SHA-256", () => isSha(hashes.electronPackageJson, 64)],
+    ["Playwright package SHA-256", () => isSha(hashes.playwrightPackageJson, 64)],
+    ["repository package SHA-256", () => isSha(hashes.packageJson, 64)],
+    ["lockfile SHA-256", () => isSha(hashes.lockfile, 64)],
+    ["Electron version", () => isVersion(electronVersion)],
+    ["Playwright version", () => isVersion(playwrightVersion)],
+    ["changed-files output", () => isNonEmptyString(changedFilesText)],
+    ["changed-files list", () => Array.isArray(changedFiles)],
   ];
+  const validationErrors = required
+    .filter(([, check]) => !check())
+    .map(([name]) => `provenance ${name} is missing or malformed`);
+  errors.push(...validationErrors);
 
   return {
-    status: errors.length === 0 && required.every((value) => value !== undefined),
+    status: errors.length === 0,
     worktree: repoRoot,
     baseRef: resolvedBaseRef,
     baseSha,
@@ -383,7 +405,7 @@ export async function finalizeDiagnostics({
   const cleanupSucceeded = !electronApp || (
     cleanupErrors.length === 0 && diagnostics.cleanup.verifiedExit
   );
-  if (passed && !cleanupSucceeded) diagnostics.disposition = "CLEANUP_FAILURE";
+  if (passed && (!cleanupSucceeded || persistenceError)) diagnostics.disposition = "CLEANUP_FAILURE";
   if (cleanupErrors.length > 0 || persistenceError) await persistCurrentDiagnostics();
   if (passed && cleanupSucceeded && !persistenceError) {
     try {

@@ -56,6 +56,17 @@ test("redacts complete delimiter and authorization credential forms", () => {
   assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret/);
 });
 
+test("redacts nested and escaped JSON credentials in diagnostic text", () => {
+  const sanitized = sanitizeDiagnosticsText(
+    '{"outer":{"token":"RAW-NESTED","apiKey":"RAW-API"},"ok":"retained"} '
+      + '{\\"token\\":\\"RAW-ESCAPED\\"}',
+  );
+
+  assert.match(sanitized, /\[REDACTED\]/);
+  assert.match(sanitized, /retained/);
+  assert.doesNotMatch(sanitized, /RAW-NESTED|RAW-API|RAW-ESCAPED/);
+});
+
 test("collects exact-head and artifact provenance for retained diagnostics", async () => {
   const repoRoot = await mkdtemp(path.join(os.tmpdir(), "harbor-provenance-test-"));
   const electronExecutable = path.join(repoRoot, "Electron");
@@ -101,6 +112,31 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   assert.equal(provenance.toolchain.playwright, "1.64.1");
   assert.match(provenance.artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(provenance.toolchain.pnpm, "12.12.1");
+});
+
+test("fails closed when provenance command output is empty or malformed", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "harbor-provenance-invalid-"));
+  const electronExecutable = path.join(repoRoot, "Electron");
+  const electronPackageJson = path.join(repoRoot, "electron-package.json");
+  const playwrightPackageJson = path.join(repoRoot, "playwright-package.json");
+  await writeFile(electronExecutable, "electron-bytes");
+  await writeFile(electronPackageJson, '{"version":"44.7.0"}');
+  await writeFile(playwrightPackageJson, '{"version":"1.64.1"}');
+  await writeFile(path.join(repoRoot, "package.json"), '{"name":"harbor-audio"}');
+  await writeFile(path.join(repoRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
+  const provenance = await collectRunProvenance({
+    repoRoot,
+    electronExecutable,
+    electronPackageJson,
+    playwrightPackageJson,
+    baseRef: "feature/harbor-clo-159",
+    execFileFn: async () => ({ stdout: "   \n" }),
+  });
+
+  assert.equal(provenance.status, false);
+  assert.ok(provenance.errors.some((error) => /head SHA/.test(error)));
+  assert.ok(provenance.errors.some((error) => /changed-files output/.test(error)));
 });
 
 test("labels Playwright PID observations as unverified and parses ANSI log markers", () => {
@@ -185,9 +221,10 @@ test("forced termination is followed by bounded exit verification before cleanup
 });
 
 test("persistence failure retains the profile after an otherwise successful callback", async () => {
+  const diagnostics = { ...diagnosticsFixture(), disposition: "PASS" };
   let removed = false;
   const result = await finalizeDiagnostics({
-    diagnostics: diagnosticsFixture(),
+    diagnostics,
     passed: true,
     profileRoot: "/tmp/harbor-profile",
     persist: async () => {
@@ -201,6 +238,7 @@ test("persistence failure retains the profile after an otherwise successful call
   assert.equal(result.persistenceError.message, "diagnostic disk failure");
   assert.equal(result.removedProfile, false);
   assert.equal(removed, false);
+  assert.equal(diagnostics.disposition, "CLEANUP_FAILURE");
 });
 
 test("profile-removal failure is persisted before the profile is retained", async () => {
