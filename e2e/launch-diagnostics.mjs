@@ -5,7 +5,7 @@ export const DEFAULT_PROCESS_EXIT_TIMEOUT_MS = 15_000;
 export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
-const SENSITIVE_ASSIGNMENT_PATTERN = /(\b(?:cookie|password|passphrase|secret|token|api[_-]?key)\b\s*[:=]\s*)([^\s,;]+)/gi;
+const SENSITIVE_ASSIGNMENT_PATTERN = /(["']?\b(?:cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|client[_-]?secret|id[_-]?token|session[_-]?token|api[_-]?key)\b["']?\s*[:=]\s*)[^\r\n;,]*/gi;
 const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 
