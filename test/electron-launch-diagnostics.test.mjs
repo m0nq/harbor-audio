@@ -139,6 +139,58 @@ test("fails closed when provenance command output is empty or malformed", async 
   assert.ok(provenance.errors.some((error) => /changed-files output/.test(error)));
 });
 
+test("accepts a valid empty changed-file list while rejecting malformed versions", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "harbor-provenance-empty-diff-"));
+  const electronExecutable = path.join(repoRoot, "Electron");
+  const electronPackageJson = path.join(repoRoot, "electron-package.json");
+  const playwrightPackageJson = path.join(repoRoot, "playwright-package.json");
+  await writeFile(electronExecutable, "electron-bytes");
+  await writeFile(electronPackageJson, '{"version":"44.7.0"}');
+  await writeFile(playwrightPackageJson, '{"version":"1.64.1"}');
+  await writeFile(path.join(repoRoot, "package.json"), '{"name":"harbor-audio"}');
+  await writeFile(path.join(repoRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
+  const outputs = new Map([
+    ["git rev-parse HEAD", "a".repeat(40)],
+    ["git rev-parse --verify feature/harbor-clo-159^{commit}", "b".repeat(40)],
+    ["git diff --name-only feature/harbor-clo-159...HEAD", ""],
+    ["git status --short --branch", "## mw/harbor-clo-160\n"],
+    ["pnpm --version", "12.12.1\n"],
+    ["sw_vers -productVersion", "26.7.2\n"],
+    ["uname -m", "arm64\n"],
+    [`file ${electronExecutable}`, `${electronExecutable}: Mach-O 64-bit executable arm64\n`],
+    [`otool -l ${electronExecutable}`, "cmd LC_UUID\n    uuid 4C4C44AF-5555-3144-A1E7-7E571B4F50E9\n"],
+  ]);
+
+  const validEmptyDiff = await collectRunProvenance({
+    repoRoot,
+    electronExecutable,
+    electronPackageJson,
+    playwrightPackageJson,
+    baseRef: "feature/harbor-clo-159",
+    execFileFn: async (command, args) => ({
+      stdout: outputs.get([command, ...args].join(" ")) ?? "",
+    }),
+  });
+  assert.equal(validEmptyDiff.status, true);
+  assert.deepEqual(validEmptyDiff.changedFiles, []);
+
+  const malformedVersion = await collectRunProvenance({
+    repoRoot,
+    electronExecutable,
+    electronPackageJson,
+    playwrightPackageJson,
+    baseRef: "feature/harbor-clo-159",
+    execFileFn: async (command, args) => ({
+      stdout: [command, ...args].join(" ") === "sw_vers -productVersion"
+        ? "not-a-version\n"
+        : outputs.get([command, ...args].join(" ")) ?? "",
+    }),
+  });
+  assert.equal(malformedVersion.status, false);
+  assert.ok(malformedVersion.errors.some((error) => /macOS version/.test(error)));
+});
+
 test("labels Playwright PID observations as unverified and parses ANSI log markers", () => {
   const error = new Error(
     "\u001b[2m - <launched> pid=4242\u001b[22m\n"

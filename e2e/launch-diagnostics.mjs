@@ -114,19 +114,23 @@ export async function collectRunProvenance({
   readFileFn = defaultReadFile,
 } = {}) {
   const errors = [];
-  const commandResult = async (commandName, args) => {
+  const commandResult = async (commandName, args, { details = false } = {}) => {
     const result = await runCommand(commandName, args, repoRoot, execFileFn);
     if (result.error) errors.push(result.error);
-    return result.value;
+    return details ? result : result.value;
   };
   const resolvedBaseRef = baseRef
     ?? process.env.HARBOR_NATIVE_BASE_REF
     ?? (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
   const headSha = await commandResult("git", ["rev-parse", "HEAD"]);
   const baseSha = await commandResult("git", ["rev-parse", "--verify", `${resolvedBaseRef}^{commit}`]);
-  const changedFilesText = baseSha
-    ? await commandResult("git", ["diff", "--name-only", `${resolvedBaseRef}...HEAD`])
+  const changedFilesResult = baseSha
+    ? await commandResult("git", ["diff", "--name-only", `${resolvedBaseRef}...HEAD`], { details: true })
     : undefined;
+  const changedFilesText = changedFilesResult?.value;
+  const changedFilesOutputPresent = Boolean(
+    changedFilesResult && !changedFilesResult.error && typeof changedFilesText === "string",
+  );
   const repositoryStatus = await commandResult("git", ["status", "--short", "--branch"]);
   const pnpmVersion = await commandResult("pnpm", ["--version"]);
   const macOSVersion = await commandResult("sw_vers", ["-productVersion"]);
@@ -175,7 +179,7 @@ export async function collectRunProvenance({
     ["base SHA", () => isSha(baseSha, 40)],
     ["repository status", () => isNonEmptyString(repositoryStatus)],
     ["pnpm version", () => isVersion(pnpmVersion)],
-    ["macOS version", () => isNonEmptyString(macOSVersion)],
+    ["macOS version", () => isVersion(macOSVersion)],
     ["host architecture", () => /^(arm64|x86_64)$/.test(architecture ?? "")],
     ["Electron file description", () => isNonEmptyString(electronFileDescription)],
     ["Electron UUID", () => /^[A-F0-9]{8}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{12}$/i.test(electronUuid ?? "")],
@@ -187,7 +191,7 @@ export async function collectRunProvenance({
     ["lockfile SHA-256", () => isSha(hashes.lockfile, 64)],
     ["Electron version", () => isVersion(electronVersion)],
     ["Playwright version", () => isVersion(playwrightVersion)],
-    ["changed-files output", () => isNonEmptyString(changedFilesText)],
+    ["changed-files output", () => changedFilesOutputPresent],
     ["changed-files list", () => Array.isArray(changedFiles)],
   ];
   const validationErrors = required
