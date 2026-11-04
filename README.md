@@ -96,6 +96,19 @@ test-owned temporary `userData` and `sessionData` paths, and cleans up only
 processes and profiles owned by the test. Failed diagnostics may be retained
 for review.
 
+In a fresh exact-pinned dependency tree, Electron 44 may have package metadata
+without its native bundle until the package is required. Treat native artifact
+materialization as a separate approved dependency-bootstrap step before direct
+executable E2E; record the resulting executable path, UUID, architecture, and
+SHA-256. Do not make the acceptance harness download or replace dependencies.
+For example, from the approved bootstrap environment:
+
+```zsh
+/opt/homebrew/bin/node -e "console.log(require('electron'))"
+```
+
+This command is dependency materialization evidence, not native acceptance.
+
 ## Architecture
 
 - `src/main.ts` creates the Electron window, applies the local renderer path,
