@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   buildFailureError,
   collectRunProvenance,
+  createBoundedDiagnosticsCapture,
   currentInvocationCommand,
   DEFAULT_COMMAND_TIMEOUT_MS,
   diagnosticsText,
@@ -80,6 +81,36 @@ test("redacts space-delimited CLI credential arguments", () => {
   assert.doesNotMatch(sanitized, /raw-cli-token|raw-cli-secret|raw-cli-auth/);
 });
 
+test("redacts credentials in structured command argument arrays", () => {
+  const sanitized = JSON.parse(diagnosticsText({
+    invocation: { command: ["node", "--token", "raw-array-token", "--keep", "retained"] },
+  }));
+
+  assert.deepEqual(sanitized.invocation.command, [
+    "node",
+    "--token",
+    "[REDACTED]",
+    "--keep",
+    "retained",
+  ]);
+  assert.doesNotMatch(JSON.stringify(sanitized), /raw-array-token/);
+});
+
+test("bounds UTF-8 diagnostic capture and records truncation", () => {
+  let truncation;
+  const capture = createBoundedDiagnosticsCapture("Page console", {
+    maxBytes: 64,
+    onTruncate: (error) => { truncation = error; },
+  });
+
+  capture.append("é".repeat(100));
+
+  assert.equal(capture.truncated, true);
+  assert.ok(capture.bytes <= 64);
+  assert.match(capture.values.join(""), /capture truncated/);
+  assert.match(truncation.message, /Page console capture exceeded 64 bytes/);
+});
+
 test("records the Node exec arguments and resolves the test script path", () => {
   assert.deepEqual(currentInvocationCommand({
     execPath: "/opt/homebrew/bin/node",
@@ -118,6 +149,39 @@ test("retains a failed profile when a process error arrives before finalization"
     },
   });
 
+  assert.equal(removed, false);
+  assert.equal(diagnostics.disposition, "FAILURE");
+});
+
+test("settles late process errors before persisting and removing a passing profile", async () => {
+  const diagnostics = { ...diagnosticsFixture(), disposition: "PASS", processFailure: false };
+  const child = new EventEmitter();
+  child.exitCode = 0;
+  child.signalCode = null;
+  diagnostics.cleanup.closeObserved = true;
+  let removed = false;
+  let persistedFailure;
+
+  await finalizeDiagnostics({
+    diagnostics,
+    electronApp: { close: async () => {} },
+    child,
+    passed: true,
+    profileRoot: "/tmp/harbor-profile",
+    persist: async (current) => {
+      persistedFailure = current.processFailure;
+      return "/tmp/harbor-diagnostics.json";
+    },
+    settleAfterClose: async () => {
+      diagnostics.processFailure = true;
+      diagnostics.processErrors.push("late child error");
+    },
+    removeProfile: async () => {
+      removed = true;
+    },
+  });
+
+  assert.equal(persistedFailure, true);
   assert.equal(removed, false);
   assert.equal(diagnostics.disposition, "FAILURE");
 });

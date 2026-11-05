@@ -9,6 +9,7 @@ export const DEFAULT_PROCESS_EXIT_TIMEOUT_MS = 15_000;
 export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 export const MAX_CAPTURED_STREAM_BYTES = 1024 * 1024;
+export const POST_CLOSE_SETTLEMENT_TIMEOUT_MS = 100;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
 const SENSITIVE_NAME_PATTERN = "(?:(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*|[A-Za-z0-9]*?(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)[A-Za-z0-9]*)";
@@ -42,6 +43,7 @@ const STREAM_CHUNK_ARRAY_KEYS = new Set([
   "pageConsole",
   "pageErrors",
 ]);
+const COMMAND_ARRAY_KEYS = new Set(["args", "argv", "command"]);
 const execFile = promisify(defaultExecFile);
 
 function errorMessage(error) {
@@ -68,6 +70,24 @@ export function sanitizeDiagnosticsValue(value, key = "") {
   if (Array.isArray(value)) {
     if (STREAM_CHUNK_ARRAY_KEYS.has(key) && value.length > 0 && value.every((entry) => typeof entry === "string")) {
       return sanitizeDiagnosticsText(value.join(""));
+    }
+    if (COMMAND_ARRAY_KEYS.has(key) && value.every((entry) => typeof entry === "string")) {
+      const sanitized = [];
+      let redactNext = false;
+      for (const entry of value) {
+        if (redactNext && !entry.startsWith("--")) {
+          sanitized.push("[REDACTED]");
+          redactNext = false;
+          continue;
+        }
+        redactNext = false;
+        const sanitizedEntry = sanitizeDiagnosticsText(entry);
+        sanitized.push(sanitizedEntry);
+        if (/^--[A-Za-z0-9_-]*(?:token|secret|password|passphrase|authorization|cookie|api[_-]?key)[A-Za-z0-9_-]*$/i.test(entry)) {
+          redactNext = true;
+        }
+      }
+      return sanitized;
     }
     return value.map((entry) => sanitizeDiagnosticsValue(entry));
   }
@@ -121,6 +141,38 @@ export function utf8Prefix(value, maxBytes) {
   let end = maxBytes;
   while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
   return bytes.subarray(0, end).toString("utf8");
+}
+
+export function createBoundedDiagnosticsCapture(
+  label,
+  { maxBytes = MAX_CAPTURED_STREAM_BYTES, onTruncate } = {},
+) {
+  const values = [];
+  let bytes = 0;
+  let truncated = false;
+
+  const append = (value) => {
+    if (truncated) return;
+    const text = String(value);
+    const remaining = maxBytes - bytes;
+    const textBytes = Buffer.byteLength(text, "utf8");
+    if (textBytes <= remaining) {
+      values.push(text);
+      bytes += textBytes;
+      return;
+    }
+
+    const marker = `[${label} capture truncated at ${maxBytes} bytes]`;
+    const markerBytes = Buffer.byteLength(marker, "utf8");
+    const prefixBytes = Math.max(0, remaining - markerBytes);
+    if (prefixBytes > 0) values.push(utf8Prefix(text, prefixBytes));
+    if (remaining > prefixBytes) values.push(utf8Prefix(marker, remaining - prefixBytes));
+    bytes = maxBytes;
+    truncated = true;
+    onTruncate?.(new Error(`${label} capture exceeded ${maxBytes} bytes; output truncated`));
+  };
+
+  return { values, append, get bytes() { return bytes; }, get truncated() { return truncated; } };
 }
 
 export function currentInvocationCommand({
@@ -528,6 +580,7 @@ export async function finalizeDiagnostics({
   removeProfile = defaultRm,
   waitForExit = waitForProcessExit,
   kill = (target) => target.kill(),
+  settleAfterClose = async () => {},
 }) {
   const cleanupErrors = [];
   let persistenceError;
@@ -607,6 +660,13 @@ export async function finalizeDiagnostics({
       const verificationError = new Error("Electron child process exit could not be verified");
       cleanupErrors.push(verificationError);
       recordDiagnosticError(diagnostics, verificationError);
+    }
+
+    try {
+      await settleAfterClose();
+    } catch (error) {
+      cleanupErrors.push(error);
+      recordDiagnosticError(diagnostics, error);
     }
   }
 

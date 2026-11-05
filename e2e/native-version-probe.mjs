@@ -1,5 +1,5 @@
 import { spawn as defaultSpawn, execFile as defaultExecFile } from "node:child_process";
-import { chmod, lstat, mkdtemp, realpath, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -114,9 +114,15 @@ export async function validatePrivateRunRoot(
 }
 
 export async function createPrivateRunRoot({ tmpRoot = os.tmpdir() } = {}) {
-  const runRoot = await mkdtemp(path.join(tmpRoot, "harbor-native-version-"));
-  await chmod(runRoot, 0o700);
-  return validatePrivateRunRoot(runRoot);
+  let runRoot;
+  try {
+    runRoot = await mkdtemp(path.join(tmpRoot, "harbor-native-version-"));
+    await chmod(runRoot, 0o700);
+    return await validatePrivateRunRoot(runRoot);
+  } catch (error) {
+    if (runRoot) await rm(runRoot, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 async function processRecord(pid, execFileFn) {

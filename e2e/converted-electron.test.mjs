@@ -13,6 +13,8 @@ import {
   finalizeDiagnostics,
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
+  POST_CLOSE_SETTLEMENT_TIMEOUT_MS,
+  createBoundedDiagnosticsCapture,
   recordProcessError,
   utf8Prefix,
   validateExpectedProvenance,
@@ -134,6 +136,18 @@ async function withElectronLaunch(scenario, callback) {
     passed = false;
     diagnostics.disposition = "FAILURE";
   };
+  const electronConsoleCapture = createBoundedDiagnosticsCapture("Electron console", {
+    onTruncate: markProcessFailure,
+  });
+  const pageConsoleCapture = createBoundedDiagnosticsCapture("Page console", {
+    onTruncate: markProcessFailure,
+  });
+  const pageErrorCapture = createBoundedDiagnosticsCapture("Page error", {
+    onTruncate: markProcessFailure,
+  });
+  diagnostics.electronConsole = electronConsoleCapture.values;
+  diagnostics.pageConsole = pageConsoleCapture.values;
+  diagnostics.pageErrors = pageErrorCapture.values;
 
   try {
     if (!runProvenance.status) {
@@ -190,17 +204,17 @@ async function withElectronLaunch(scenario, callback) {
     }
 
     listen(electronApp, "console", (message) => {
-      diagnostics.electronConsole.push(`${message.type()}: ${message.text()}`);
+      electronConsoleCapture.append(`${message.type()}: ${message.text()}`);
     });
 
     page = await electronApp.firstWindow({ timeout: timeoutMs });
     diagnostics.startupPhase = "renderer-started";
     page.setDefaultTimeout(timeoutMs);
     listen(page, "console", (message) => {
-      diagnostics.pageConsole.push(`${message.type()}: ${message.text()}`);
+      pageConsoleCapture.append(`${message.type()}: ${message.text()}`);
     });
     listen(page, "pageerror", (error) => {
-      diagnostics.pageErrors.push(error.stack ?? error.message);
+      pageErrorCapture.append(error.stack ?? error.message);
     });
 
     const runtimePaths = await electronApp.evaluate(({ app }) => ({
@@ -254,6 +268,9 @@ async function withElectronLaunch(scenario, callback) {
         passed,
         profileRoot,
         timeout: timeoutMs,
+        settleAfterClose: () => new Promise((resolve) => {
+          setTimeout(resolve, POST_CLOSE_SETTLEMENT_TIMEOUT_MS);
+        }),
       });
     } finally {
       for (const dispose of listenerDisposers.splice(0).reverse()) dispose();
