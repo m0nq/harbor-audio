@@ -84,7 +84,7 @@ test("redacts space-delimited CLI credential arguments", () => {
 
 test("redacts credentials in structured command argument arrays", () => {
   const sanitized = JSON.parse(diagnosticsText({
-    invocation: { command: ["node", "--token", "raw-array-token", "--keep", "retained"] },
+    invocation: { command: ["node", "--token", "raw-array-token", "--keep", "retained", "--secret", "--starts-with-dashes"] },
   }));
 
   assert.deepEqual(sanitized.invocation.command, [
@@ -93,8 +93,11 @@ test("redacts credentials in structured command argument arrays", () => {
     "[REDACTED]",
     "--keep",
     "retained",
+    "--secret",
+    "[REDACTED]",
   ]);
   assert.doesNotMatch(JSON.stringify(sanitized), /raw-array-token/);
+  assert.doesNotMatch(JSON.stringify(sanitized), /starts-with-dashes/);
 });
 
 test("bounds UTF-8 diagnostic capture and records truncation", () => {
@@ -399,6 +402,17 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   assert.equal(provenance.toolchain.playwright, "1.64.1");
   assert.match(provenance.artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(provenance.toolchain.pnpm, "12.12.1");
+  assert.deepEqual(provenance.commands.map(({ argv, cwd, outcome }) => ({ argv, cwd, outcome })), [
+    { argv: ["git", "rev-parse", "HEAD"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["git", "rev-parse", "--verify", "feature/harbor-clo-159^{commit}"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["git", "diff", "--name-only", "feature/harbor-clo-159...HEAD"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["git", "status", "--short", "--branch"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["pnpm", "--version"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["sw_vers", "-productVersion"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["uname", "-m"], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["file", electronExecutable], cwd: repoRoot, outcome: "PASS" },
+    { argv: ["otool", "-l", electronExecutable], cwd: repoRoot, outcome: "PASS" },
+  ]);
   assert.deepEqual(validateExpectedProvenance(provenance, {
     worktree: repoRoot,
     baseRef: "feature/harbor-clo-159",

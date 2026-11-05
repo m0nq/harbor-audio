@@ -83,17 +83,17 @@ export function sanitizeDiagnosticsValue(value, key = "") {
       const sanitized = [];
       let redactNext = false;
       for (const entry of value) {
-        if (redactNext && !entry.startsWith("--")) {
+        const isSensitiveOption = /^--[A-Za-z0-9_-]*(?:token|secret|password|passphrase|authorization|cookie|api[_-]?key)[A-Za-z0-9_-]*$/i.test(entry);
+        if (redactNext) {
           sanitized.push("[REDACTED]");
           redactNext = false;
+          if (isSensitiveOption) redactNext = true;
           continue;
         }
         redactNext = false;
         const sanitizedEntry = sanitizeDiagnosticsText(entry);
         sanitized.push(sanitizedEntry);
-        if (/^--[A-Za-z0-9_-]*(?:token|secret|password|passphrase|authorization|cookie|api[_-]?key)[A-Za-z0-9_-]*$/i.test(entry)) {
-          redactNext = true;
-        }
+        if (isSensitiveOption) redactNext = true;
       }
       return sanitized;
     }
@@ -391,8 +391,15 @@ export async function collectRunProvenance({
   readFileFn = defaultReadFile,
 } = {}) {
   const errors = [];
+  const commands = [];
   const commandResult = async (commandName, args, { details = false } = {}) => {
     const result = await runCommand(commandName, args, repoRoot, execFileFn);
+    commands.push({
+      argv: [commandName, ...args],
+      cwd: repoRoot,
+      outcome: result.error ? "FAILURE" : "PASS",
+      ...(result.error ? { error: result.error } : {}),
+    });
     if (result.error) errors.push(result.error);
     return details ? result : result.value;
   };
@@ -500,6 +507,7 @@ export async function collectRunProvenance({
         "npm_config_electron_mirror",
       ],
     },
+    commands,
     toolchain: {
       node: process.version,
       pnpm: pnpmVersion,
