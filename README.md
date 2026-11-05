@@ -96,6 +96,7 @@ version probe before the full GUI suite:
 
 ```zsh
 env \
+  HARBOR_NATIVE_EXPECTED_WORKTREE='/private/tmp/harbor-audio-clo160' \
   HARBOR_NATIVE_EXPECTED_BASE_REF='feature/harbor-clo-159' \
   HARBOR_NATIVE_EXPECTED_BASE_SHA='<approved-base-sha>' \
   HARBOR_NATIVE_EXPECTED_HEAD_SHA='<approved-exact-head-sha>' \

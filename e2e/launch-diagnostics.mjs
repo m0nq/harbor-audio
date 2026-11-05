@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { execFile as defaultExecFile } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { mkdir as defaultMkdir, readFile as defaultReadFile, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -52,7 +53,12 @@ export function sanitizeDiagnosticsText(value) {
 export function sanitizeDiagnosticsValue(value, key = "") {
   if (SENSITIVE_KEY_PATTERN.test(key)) return "[REDACTED]";
   if (typeof value === "string") return sanitizeDiagnosticsText(value);
-  if (Array.isArray(value)) return value.map((entry) => sanitizeDiagnosticsValue(entry));
+  if (Array.isArray(value)) {
+    if (value.length > 0 && value.every((entry) => typeof entry === "string")) {
+      return sanitizeDiagnosticsText(value.join(""));
+    }
+    return value.map((entry) => sanitizeDiagnosticsValue(entry));
+  }
   if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value).map(([entryKey, entryValue]) => [
@@ -105,10 +111,23 @@ function isVersion(value) {
   return typeof value === "string" && /^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
 }
 
+function canonicalPath(value) {
+  if (!isNonEmptyString(value)) return value;
+  try {
+    return realpathSync.native(value);
+  } catch {
+    return path.resolve(value);
+  }
+}
+
 export function validateExpectedProvenance(provenance, expectations = {}) {
   const mismatches = [];
   const compare = (label, actual, expected) => {
-    if (expected !== undefined && actual !== expected) {
+    if (expected === undefined) return;
+    const pathsMustMatchByRealpath = label === "worktree" || label === "invocation cwd";
+    const comparedActual = pathsMustMatchByRealpath ? canonicalPath(actual) : actual;
+    const comparedExpected = pathsMustMatchByRealpath ? canonicalPath(expected) : expected;
+    if (comparedActual !== comparedExpected) {
       mismatches.push(`${label} expected ${expected} but was ${actual ?? "missing"}`);
     }
   };
@@ -145,6 +164,7 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
 }
 
 export const EXACT_PROVENANCE_ENVIRONMENT_NAMES = [
+  "HARBOR_NATIVE_EXPECTED_WORKTREE",
   "HARBOR_NATIVE_EXPECTED_BASE_SHA",
   "HARBOR_NATIVE_EXPECTED_HEAD_SHA",
   "HARBOR_NATIVE_EXPECTED_NODE_VERSION",
@@ -167,11 +187,13 @@ export function expectedProvenanceFromEnvironment({
   executable,
   electronVersion,
   baseRef = "feature/harbor-clo-159",
+  environment = process.env,
 } = {}) {
-  const value = (name) => process.env[name]?.trim();
+  const value = (name) => environment[name]?.trim();
+  const expectedWorktree = value("HARBOR_NATIVE_EXPECTED_WORKTREE");
   const expected = {
-    worktree,
-    baseRef: process.env.HARBOR_NATIVE_EXPECTED_BASE_REF?.trim() || baseRef,
+    worktree: expectedWorktree,
+    baseRef: environment.HARBOR_NATIVE_EXPECTED_BASE_REF?.trim() || baseRef,
     baseSha: value("HARBOR_NATIVE_EXPECTED_BASE_SHA"),
     headSha: value("HARBOR_NATIVE_EXPECTED_HEAD_SHA"),
     nodeVersion: value("HARBOR_NATIVE_EXPECTED_NODE_VERSION"),
@@ -188,7 +210,7 @@ export function expectedProvenanceFromEnvironment({
     playwrightPackageJsonSha256: value("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256"),
     packageJsonSha256: value("HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256"),
     lockfileSha256: value("HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256"),
-    invocationCwd: worktree,
+    invocationCwd: expectedWorktree,
     branchStatus: value("HARBOR_NATIVE_EXPECTED_BRANCH_STATUS"),
     requireCleanWorkingTree: true,
   };

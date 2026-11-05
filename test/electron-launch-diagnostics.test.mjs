@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -8,7 +8,9 @@ import {
   buildFailureError,
   collectRunProvenance,
   DEFAULT_COMMAND_TIMEOUT_MS,
+  diagnosticsText,
   finalizeDiagnostics,
+  expectedProvenanceFromEnvironment,
   launchProcessDiagnostics,
   persistDiagnostics,
   sanitizeDiagnosticsText,
@@ -72,6 +74,61 @@ test("redacts nested and escaped JSON credentials in diagnostic text", () => {
   assert.match(sanitized, /\[REDACTED\]/);
   assert.match(sanitized, /retained/);
   assert.doesNotMatch(sanitized, /RAW-NESTED|RAW-API|RAW-ESCAPED/);
+});
+
+test("redacts credentials split across diagnostic chunks", () => {
+  const sanitized = diagnosticsText({
+    processErrors: ["Authorization ", "Foo+Bar split-secret"],
+    pageErrors: ["token=", "split-token"],
+  });
+
+  assert.match(sanitized, /Authorization Foo\+Bar \[REDACTED\]/);
+  assert.match(sanitized, /token=\[REDACTED\]/);
+  assert.doesNotMatch(sanitized, /split-secret|split-token/);
+});
+
+test("requires an independently supplied canonical worktree expectation", () => {
+  const { expected, missing } = expectedProvenanceFromEnvironment({
+    worktree: "/derived/worktree",
+    executable: "/derived/worktree/Electron",
+    electronVersion: "44.7.0",
+    environment: {
+      HARBOR_NATIVE_EXPECTED_WORKTREE: "/approved/worktree",
+      HARBOR_NATIVE_EXPECTED_BASE_SHA: "1".repeat(40),
+      HARBOR_NATIVE_EXPECTED_HEAD_SHA: "2".repeat(40),
+      HARBOR_NATIVE_EXPECTED_NODE_VERSION: "v26.13.0",
+      HARBOR_NATIVE_EXPECTED_PNPM_VERSION: "12.12.1",
+      HARBOR_NATIVE_EXPECTED_MACOS_VERSION: "26.7.2",
+      HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE: "arm64",
+      HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION: "1.64.1",
+      HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE: "arm64",
+      HARBOR_NATIVE_EXPECTED_ELECTRON_UUID: "4C4C44AF-5555-3144-A1E7-7E571B4F50E9",
+      HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256: "3".repeat(64),
+      HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256: "4".repeat(64),
+      HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256: "5".repeat(64),
+      HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256: "6".repeat(64),
+      HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256: "7".repeat(64),
+      HARBOR_NATIVE_EXPECTED_BRANCH_STATUS: "## approved",
+    },
+  });
+
+  assert.equal(expected.worktree, "/approved/worktree");
+  assert.equal(expected.invocationCwd, "/approved/worktree");
+  assert.equal(missing.length, 0);
+});
+
+test("compares worktree and invocation paths by realpath", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "harbor-provenance-realpath-"));
+  const alias = path.join(root, "alias");
+  await symlink(root, alias, "dir");
+
+  assert.deepEqual(validateExpectedProvenance({
+    worktree: alias,
+    invocation: { cwd: alias },
+  }, {
+    worktree: root,
+    invocationCwd: root,
+  }), []);
 });
 
 test("collects exact-head and artifact provenance for retained diagnostics", async () => {
