@@ -1,5 +1,5 @@
 import { spawn as defaultSpawn, execFile as defaultExecFile } from "node:child_process";
-import { chmod, lstat, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readdir as defaultReaddir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -93,6 +93,36 @@ function matchesElectronExecutable(command, executable) {
   return command === executable
     || command.startsWith(`${executable} `)
     || command.startsWith(`"${executable}" `);
+}
+
+function matchesKnownElectronExecutable(command, electronExecutable, helperExecutables = []) {
+  return [electronExecutable, ...helperExecutables].some((executable) => (
+    matchesElectronExecutable(command, executable)
+  ));
+}
+
+export async function resolveElectronHelperExecutables(
+  electronExecutable,
+  { readdirFn = defaultReaddir, statFn = stat } = {},
+) {
+  const frameworksRoot = path.resolve(path.dirname(electronExecutable), "../Frameworks");
+  const entries = await readdirFn(frameworksRoot, { withFileTypes: true });
+  const helperExecutables = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !entry.name.startsWith("Electron Helper") || !entry.name.endsWith(".app")) continue;
+    const helperName = entry.name.slice(0, -4);
+    const helperExecutable = path.join(
+      frameworksRoot,
+      entry.name,
+      "Contents",
+      "MacOS",
+      helperName,
+    );
+    const helperInfo = await statFn(helperExecutable);
+    if (!helperInfo.isFile()) throw new Error(`Electron helper executable is not a file: ${helperExecutable}`);
+    helperExecutables.push(helperExecutable);
+  }
+  return helperExecutables.sort();
 }
 
 export function buildProbeEnvironment(baseEnvironment = process.env) {
@@ -443,6 +473,7 @@ async function terminateOwnedTree({
   childPid,
   supervisorPid,
   executable,
+  helperExecutables = [],
   execFileFn,
   killFn,
   graceMs,
@@ -605,7 +636,7 @@ async function terminateOwnedTree({
     unattributedElectronProcesses = remaining.records.filter((record) => (
       record.pid !== childPid
       && !knownDescendantPids.has(record.pid)
-      && matchesElectronExecutable(record.command, executable)
+      && matchesKnownElectronExecutable(record.command, executable, helperExecutables)
     ));
     verifiedExit = verifiedExit
       && !remaining.directChildVerified
@@ -643,6 +674,7 @@ async function terminateOwnedTree({
 export async function runVersionProbe({
   repoRoot,
   electronExecutable,
+  helperExecutables = [],
   provenance,
   runRoot,
   expectedVersion = EXPECTED_ELECTRON_VERSION,
@@ -664,6 +696,7 @@ export async function runVersionProbe({
     runRoot,
     command: {
       executable: electronExecutable,
+      helperExecutables,
       args: ["--version"],
       cwd: repoRoot,
       environmentOverridesRemoved: ELECTRON_OVERRIDE_NAMES,
@@ -677,6 +710,7 @@ export async function runVersionProbe({
       ownership: "not-established",
       ownershipSource: "none",
       descendants: [],
+      helperExecutables,
       unattributedElectronProcesses: [],
       termination: [],
     },
@@ -811,6 +845,7 @@ export async function runVersionProbe({
         childPid: child.pid,
         supervisorPid,
         executable: electronExecutable,
+        helperExecutables,
         execFileFn,
         killFn,
         graceMs,
@@ -937,10 +972,15 @@ async function main() {
     electronPackageRoot,
     "dist/Electron.app/Contents/MacOS/Electron",
   );
+  let helperExecutables = [];
   let runRoot;
   let result;
   try {
     runRoot = await createPrivateRunRoot();
+    helperExecutables = await resolveElectronHelperExecutables(electronExecutable);
+    if (helperExecutables.length === 0) {
+      throw new Error("no Electron Helper executables were resolved from the pinned Electron bundle");
+    }
     const { expected: expectedProvenance, missing: missingExpectedProvenance } = expectedProvenanceFromEnvironment({
       worktree: repoRoot,
       executable: electronExecutable,
@@ -952,6 +992,7 @@ async function main() {
     const provenance = await collectRunProvenance({
       repoRoot,
       electronExecutable,
+      electronHelperExecutables: helperExecutables,
       baseRef: expectedProvenance.baseRef,
       electronPackageJson: path.join(electronPackageRoot, "package.json"),
       playwrightPackageJson: path.join(
@@ -962,6 +1003,7 @@ async function main() {
     result = await runVersionProbe({
       repoRoot,
       electronExecutable,
+      helperExecutables,
       provenance,
       runRoot,
       expectedProvenance,

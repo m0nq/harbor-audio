@@ -13,6 +13,7 @@ import {
   parseProcessTable,
   persistProbeResult,
   PROCESS_INSPECTION_TIMEOUT_MS,
+  resolveElectronHelperExecutables,
   runVersionProbe,
   validatePrivateRunRoot,
 } from "../e2e/native-version-probe.mjs";
@@ -111,6 +112,32 @@ test("validates a private mode-700 run root", async () => {
   }
 });
 
+test("resolves the pinned Electron helper executable paths", async () => {
+  const electronExecutable = "/opt/Electron.app/Contents/MacOS/Electron";
+  const helperPaths = [];
+  const helperNames = [
+    "Electron Helper (Renderer).app",
+    "Electron Helper.app",
+    "Unrelated.app",
+  ];
+  const helperExecutables = await resolveElectronHelperExecutables(electronExecutable, {
+    readdirFn: async () => helperNames.map((name) => ({
+      name,
+      isDirectory: () => true,
+    })),
+    statFn: async (helperPath) => {
+      helperPaths.push(helperPath);
+      return { isFile: () => true };
+    },
+  });
+
+  assert.deepEqual(helperExecutables, [
+    "/opt/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)",
+    "/opt/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper",
+  ]);
+  assert.deepEqual(helperPaths, helperExecutables);
+});
+
 test("surfaces a retained native run root when setup cleanup fails", async () => {
   let error;
   try {
@@ -135,6 +162,7 @@ test("surfaces a retained native run root when setup cleanup fails", async () =>
 test("does not report PASS when a late Electron helper appears after the initial snapshot", async () => {
   const child = fakeChild();
   const executable = "/opt/Electron";
+  const helperExecutable = "/opt/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)";
   const startTime = "Mon Nov  4 12:00:00 2026";
   const helperPid = 4343;
   let phase = "child";
@@ -147,7 +175,7 @@ test("does not report PASS when a late Electron helper appears after the initial
       const pid = Number(args[1]);
       if (pid === 100) return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
       if (pid === child.pid && phase === "child") return { stdout: processLine(child.pid, 100, executable + " --version") };
-      if (pid === helperPid && phase === "helper") return { stdout: processLine(helperPid, 1, executable + " Helper") };
+      if (pid === helperPid && phase === "helper") return { stdout: processLine(helperPid, 1, helperExecutable) };
       const error = new Error("process not found");
       error.code = 1;
       throw error;
@@ -156,7 +184,7 @@ test("does not report PASS when a late Electron helper appears after the initial
       return {
         stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
           + (phase === "child" ? processLine(child.pid, 100, executable + " --version") : "")
-          + (phase === "helper" ? processLine(helperPid, 1, executable + " Helper") : ""),
+          + (phase === "helper" ? processLine(helperPid, 1, helperExecutable) : ""),
       };
     }
     throw new Error("unexpected ps invocation");
@@ -167,6 +195,7 @@ test("does not report PASS when a late Electron helper appears after the initial
     provenance: { status: true, toolchain: { electron: "44.7.0" } },
     runRoot: "/private/run-root",
     supervisorPid: 100,
+    helperExecutables: [helperExecutable],
     spawnFn: () => {
       setImmediate(() => {
         phase = "helper";

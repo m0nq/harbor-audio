@@ -391,6 +391,7 @@ export function expectedProvenanceFromEnvironment({
 export async function collectRunProvenance({
   repoRoot,
   electronExecutable,
+  electronHelperExecutables = [],
   electronPackageJson,
   playwrightPackageJson,
   baseRef,
@@ -526,6 +527,7 @@ export async function collectRunProvenance({
     },
     artifact: {
       executable: electronExecutable,
+      helperExecutables: electronHelperExecutables,
       architecture: electronArchitecture,
       uuid: electronUuid,
       sha256: hashes.electronExecutable,
