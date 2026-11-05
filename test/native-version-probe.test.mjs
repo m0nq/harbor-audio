@@ -43,9 +43,10 @@ function fakeExecFile({
   childAlive = true,
   startTime = "Mon Nov  4 12:00:00 2026",
 } = {}) {
-  return async (command, args) => {
+  return async (command, args, options) => {
     const isChildAlive = typeof childAlive === "function" ? childAlive() : childAlive;
     assert.equal(command, "/bin/ps");
+    assert.equal(options.env.LC_ALL, "C");
     if (args[0] === "-p") {
       const pid = Number(args[1]);
       if (pid === supervisorPid) {
@@ -177,7 +178,7 @@ test("times out and signals only the verified child PID, never its process group
   assert.equal(child.signalCode, "SIGTERM");
 });
 
-test("classifies a direct-child spawn error as FAILURE rather than TIMEOUT", async () => {
+test("classifies a direct-child spawn error with uncertain cleanup as INCONCLUSIVE", async () => {
   const child = fakeChild();
   let childAlive = true;
   const executable = "/opt/Electron";
@@ -207,8 +208,8 @@ test("classifies a direct-child spawn error as FAILURE rather than TIMEOUT", asy
     validateRunRootFn: async () => "/private/run-root",
   });
 
-  assert.equal(result.outcome, "FAILURE");
-  assert.equal(result.disposition, "FAILURE");
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
   assert.match(result.errors.join("\n"), /spawn denied/);
 });
 

@@ -24,6 +24,10 @@ export const ELECTRON_OVERRIDE_NAMES = [
 
 const execFile = promisify(defaultExecFile);
 
+function processDiagnosticEnvironment() {
+  return { ...process.env, LC_ALL: "C" };
+}
+
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -111,6 +115,7 @@ export async function createPrivateRunRoot({ tmpRoot = os.tmpdir() } = {}) {
 async function processRecord(pid, execFileFn) {
   try {
     const result = await execFileFn("/bin/ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,lstart=,command="], {
+      env: processDiagnosticEnvironment(),
       maxBuffer: 1024 * 1024,
     });
     return parseProcessTable(result.stdout)[0];
@@ -122,6 +127,7 @@ async function processRecord(pid, execFileFn) {
 
 async function processTable(execFileFn) {
   const result = await execFileFn("/bin/ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="], {
+    env: processDiagnosticEnvironment(),
     maxBuffer: 4 * 1024 * 1024,
   });
   return parseProcessTable(result.stdout);
@@ -410,6 +416,11 @@ export async function runVersionProbe({
       result.process.termination = cleanup.errors;
       result.process.descendants = cleanup.remainingDescendants;
       result.errors.push(...cleanup.errors);
+      if (!cleanup.verifiedExit) {
+        result.outcome = "INCONCLUSIVE";
+        result.disposition = "CLEANUP_FAILURE";
+        result.errors.push("direct child exit and descendant cleanup could not be verified");
+      }
       return result;
     }
 
@@ -437,6 +448,11 @@ export async function runVersionProbe({
       result.process.termination = cleanup.errors;
       result.process.descendants = cleanup.remainingDescendants;
       result.errors.push(...cleanup.errors);
+      if (!cleanup.verifiedExit) {
+        result.outcome = "INCONCLUSIVE";
+        result.disposition = "CLEANUP_FAILURE";
+        result.errors.push("direct child exit and descendant cleanup could not be verified");
+      }
       return result;
     }
 
