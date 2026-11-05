@@ -591,3 +591,28 @@ test("uses the launch handle when ps has no record for the still-live direct chi
   assert.deepEqual(signals, ["SIGTERM"]);
   assert.match(result.errors.join("\n"), /direct child identity could not be reverified/);
 });
+
+test("does not report PASS when the child exits before ownership can be observed", async () => {
+  const child = fakeChild();
+  child.exitCode = 0;
+  child.signalCode = null;
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: "/opt/Electron",
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => child,
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable: "/opt/Electron",
+      childAlive: false,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.notEqual(result.outcome, "PASS");
+  assert.match(result.errors.join("\n"), /ownership was not verified/);
+});

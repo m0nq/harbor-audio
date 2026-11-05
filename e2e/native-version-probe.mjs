@@ -377,6 +377,7 @@ async function terminateOwnedTree({
   clearTimeoutFn,
   lifecycle,
   initialDescendants = [],
+  initialDirectChildVerified = false,
 }) {
   const errors = [];
   let ownership;
@@ -386,12 +387,18 @@ async function terminateOwnedTree({
       [...initialDescendants, ...(ownership.directChildVerified ? ownership.descendants : [])]
         .map((record) => [record.pid, record]),
     );
-    if (!ownership.directChildVerified && !childExited(child) && descendantSnapshot.size === 0) {
-      errors.push("direct child identity could not be reverified; no descendant PID signal sent");
-      if (!ownership.childRecord) {
-        killDirectChildHandle(child, "SIGTERM", errors);
+    if (!ownership.directChildVerified && childExited(child) && !initialDirectChildVerified) {
+      errors.push("direct child ownership was not verified; no PID signal sent");
+    } else if (!ownership.directChildVerified && !initialDirectChildVerified) {
+      if (!childExited(child)) {
+        errors.push("direct child identity could not be reverified; no descendant PID signal sent");
+        if (!ownership.childRecord) {
+          killDirectChildHandle(child, "SIGTERM", errors);
+        } else {
+          errors.push("conflicting direct-child process identity; no handle signal sent");
+        }
       } else {
-        errors.push("conflicting direct-child process identity; no handle signal sent");
+        errors.push("direct child ownership was not verified; no PID signal sent");
       }
     } else {
       errors.push(...await signalVerifiedDescendants({
@@ -593,6 +600,7 @@ export async function runVersionProbe({
   const stdoutState = captureOutput(child.stdout, stdout);
   const stderrState = captureOutput(child.stderr, stderr);
   let initialDescendants = [];
+  let initialDirectChildVerified = false;
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
     result.startupPhase = "electron-launch";
     result.outcome = "INCONCLUSIVE";
@@ -633,6 +641,7 @@ export async function runVersionProbe({
         clearTimeoutFn,
         lifecycle,
         initialDescendants,
+        initialDirectChildVerified,
       });
     } catch (error) {
       cleanup = {
@@ -665,7 +674,8 @@ export async function runVersionProbe({
     });
     result.process.directChildPgid = ownership.childRecord?.pgid;
     initialDescendants = ownership.directChildVerified ? ownership.descendants : [];
-    if (!ownership.directChildVerified && !childExited(child)) {
+    initialDirectChildVerified = ownership.directChildVerified;
+    if (!ownership.directChildVerified) {
       result.outcome = "INCONCLUSIVE";
       result.disposition = "INCONCLUSIVE";
       result.startupPhase = "ownership-verification";
