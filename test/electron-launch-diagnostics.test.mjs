@@ -15,6 +15,7 @@ import {
   expectedProvenanceFromEnvironment,
   launchProcessDiagnostics,
   persistDiagnostics,
+  prepareIsolatedElectronProfile,
   recordProcessError,
   sanitizeDiagnosticsText,
   utf8Prefix,
@@ -109,6 +110,53 @@ test("bounds UTF-8 diagnostic capture and records truncation", () => {
   assert.ok(capture.bytes <= 64);
   assert.match(capture.values.join(""), /capture truncated/);
   assert.match(truncation.message, /Page console capture exceeded 64 bytes/);
+});
+
+test("cleans an isolated profile when user-data setup fails", async () => {
+  let removedPath;
+  await assert.rejects(
+    prepareIsolatedElectronProfile({
+      tmpRoot: "/tmp",
+      mkdtempFn: async () => "/tmp/harbor-profile-setup-failure",
+      mkdirFn: async () => { throw new Error("user-data mkdir failed"); },
+      rmFn: async (profileRoot) => { removedPath = profileRoot; },
+    }),
+    /isolated Electron profile setup failed: user-data mkdir failed/,
+  );
+  assert.equal(removedPath, "/tmp/harbor-profile-setup-failure");
+});
+
+test("cleans an isolated profile when realpath setup fails", async () => {
+  let removedPath;
+  await assert.rejects(
+    prepareIsolatedElectronProfile({
+      tmpRoot: "/tmp",
+      mkdtempFn: async () => "/tmp/harbor-profile-realpath-failure",
+      mkdirFn: async () => {},
+      realpathFn: async () => { throw new Error("user-data realpath failed"); },
+      rmFn: async (profileRoot) => { removedPath = profileRoot; },
+    }),
+    /isolated Electron profile setup failed: user-data realpath failed/,
+  );
+  assert.equal(removedPath, "/tmp/harbor-profile-realpath-failure");
+});
+
+test("surfaces an isolated profile when setup cleanup fails", async () => {
+  let error;
+  try {
+    await prepareIsolatedElectronProfile({
+      tmpRoot: "/tmp",
+      mkdtempFn: async () => "/tmp/harbor-profile-retained",
+      mkdirFn: async () => { throw new Error("user-data mkdir failed"); },
+      rmFn: async () => { throw new Error("profile cleanup failed"); },
+    });
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.equal(error?.profileRoot, "/tmp/harbor-profile-retained");
+  assert.equal(error?.cleanupError?.message, "profile cleanup failed");
+  assert.match(error?.message ?? "", /profile root retained at \/tmp\/harbor-profile-retained/);
 });
 
 test("records the Node exec arguments and resolves the test script path", () => {

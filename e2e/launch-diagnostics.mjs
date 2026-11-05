@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile as defaultExecFile } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdir as defaultMkdir, readFile as defaultReadFile, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
+import { mkdir as defaultMkdir, mkdtemp as defaultMkdtemp, readFile as defaultReadFile, realpath as defaultRealpath, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -179,6 +179,39 @@ export function waitForPostCloseSettlement(setTimeoutFn = setTimeout) {
   return new Promise((resolve) => {
     setTimeoutFn(resolve, POST_CLOSE_SETTLEMENT_TIMEOUT_MS);
   });
+}
+
+export async function prepareIsolatedElectronProfile({
+  tmpRoot,
+  prefix = "audfree-electron-e2e-",
+  mkdtempFn = defaultMkdtemp,
+  mkdirFn = defaultMkdir,
+  realpathFn = defaultRealpath,
+  rmFn = defaultRm,
+} = {}) {
+  let profileRoot;
+  try {
+    profileRoot = await mkdtempFn(path.join(tmpRoot, prefix));
+    const requestedUserDataDir = path.join(profileRoot, "user-data");
+    const artifactsDir = path.join(profileRoot, "artifacts");
+    await mkdirFn(requestedUserDataDir);
+    const userDataDir = await realpathFn(requestedUserDataDir);
+    return { profileRoot, requestedUserDataDir, artifactsDir, userDataDir };
+  } catch (error) {
+    if (!profileRoot) throw error;
+    try {
+      await rmFn(profileRoot, { recursive: true, force: true });
+    } catch (cleanupError) {
+      const retainedError = new Error(
+        `isolated Electron profile setup failed: ${errorMessage(error)}; profile root retained at ${profileRoot} because cleanup failed: ${errorMessage(cleanupError)}`,
+        { cause: error },
+      );
+      retainedError.profileRoot = profileRoot;
+      retainedError.cleanupError = cleanupError;
+      throw retainedError;
+    }
+    throw new Error(`isolated Electron profile setup failed: ${errorMessage(error)}`, { cause: error });
+  }
 }
 
 export function currentInvocationCommand({

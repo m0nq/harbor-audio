@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +13,7 @@ import {
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
   createBoundedDiagnosticsCapture,
+  prepareIsolatedElectronProfile,
   recordProcessError,
   utf8Prefix,
   validateExpectedProvenance,
@@ -85,20 +85,9 @@ function isolatedEnvironment() {
 }
 
 async function withElectronLaunch(scenario, callback) {
-  let profileRoot;
-  let requestedUserDataDir;
-  let artifactsDir;
-  let userDataDir;
-  try {
-    profileRoot = await mkdtemp(path.join(os.tmpdir(), "audfree-electron-e2e-"));
-    requestedUserDataDir = path.join(profileRoot, "user-data");
-    artifactsDir = path.join(profileRoot, "artifacts");
-    await mkdir(requestedUserDataDir);
-    userDataDir = await realpath(requestedUserDataDir);
-  } catch (error) {
-    if (profileRoot) await rm(profileRoot, { recursive: true, force: true }).catch(() => {});
-    throw error;
-  }
+  const { profileRoot, artifactsDir, userDataDir } = await prepareIsolatedElectronProfile({
+    tmpRoot: os.tmpdir(),
+  });
 
   const diagnostics = {
     scenario,
