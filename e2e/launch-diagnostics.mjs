@@ -14,8 +14,10 @@ const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
 const SENSITIVE_NAME_PATTERN = "(?:(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*|[A-Za-z0-9]*?(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)[A-Za-z0-9]*)";
 const SENSITIVE_ASSIGNMENT_PREFIX = "((?<!-)\\b" + SENSITIVE_NAME_PATTERN + "\\b\\s*[:=]\\s*)";
+const DOUBLE_QUOTED_VALUE_PATTERN = String.raw`"(?:\\.|[^"\\])*"`;
+const SINGLE_QUOTED_VALUE_PATTERN = String.raw`'(?:\\.|[^'\\])*'`;
 const DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
-  SENSITIVE_ASSIGNMENT_PREFIX + '("[^"]*")',
+  SENSITIVE_ASSIGNMENT_PREFIX + `(${DOUBLE_QUOTED_VALUE_PATTERN})`,
   "gi",
 );
 const JSON_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
@@ -23,7 +25,7 @@ const JSON_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   "gi",
 );
 const SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
-  SENSITIVE_ASSIGNMENT_PREFIX + "('[^']*')",
+  SENSITIVE_ASSIGNMENT_PREFIX + `(${SINGLE_QUOTED_VALUE_PATTERN})`,
   "gi",
 );
 const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
@@ -31,7 +33,7 @@ const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   "gi",
 );
 const CLI_SENSITIVE_ARGUMENT_PATTERN = new RegExp(
-  "(--" + SENSITIVE_NAME_PATTERN + "(?:=|\\s+))(\"[^\"]*\"|'[^']*'|[^\\s;\\r\\n]+)",
+  String.raw`(--${SENSITIVE_NAME_PATTERN}(?:=|\s+))(${DOUBLE_QUOTED_VALUE_PATTERN}|${SINGLE_QUOTED_VALUE_PATTERN}|[^\s;\r\n]+)`,
   "gi",
 );
 const AUTHORIZATION_PATTERN = /(\bauthorization(?=$|[\s:=])\s*[:=]\s*)[^\r\n;]*/gi;

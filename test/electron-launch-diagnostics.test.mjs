@@ -83,6 +83,15 @@ test("redacts space-delimited CLI credential arguments", () => {
   assert.doesNotMatch(sanitized, /raw-cli-token|raw-cli-secret|raw-cli-auth/);
 });
 
+test("redacts escaped quotes in free-form CLI credential text", () => {
+  const sanitized = sanitizeDiagnosticsText(
+    'node --password "raw multi word \\"quoted\\" secret" --keep retained',
+  );
+
+  assert.match(sanitized, /node --password \[REDACTED\] --keep retained/);
+  assert.doesNotMatch(sanitized, /raw multi word|quoted|secret/);
+});
+
 test("redacts credentials in structured command argument arrays", () => {
   const sanitized = JSON.parse(diagnosticsText({
     invocation: { command: ["node", "--token", "raw-array-token", "--keep", "retained", "--secret", "--starts-with-dashes"] },
