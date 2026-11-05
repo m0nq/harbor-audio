@@ -13,6 +13,7 @@ import {
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
   createBoundedDiagnosticsCapture,
+  createNativeScenarioSelector,
   prepareIsolatedElectronProfile,
   recordProcessError,
   utf8Prefix,
@@ -453,15 +454,12 @@ async function clearSort(page) {
   await page.getByRole("button", { name: "Clear sort", exact: true }).click();
 }
 
-const selectedNativeScenario = process.env.HARBOR_NATIVE_SCENARIO?.trim() || undefined;
-let selectedNativeScenarioFound = !selectedNativeScenario;
+const nativeScenarioSelector = createNativeScenarioSelector(process.env.HARBOR_NATIVE_SCENARIO);
 
 async function runScenario(t, name, callback) {
-  if (!selectedNativeScenario || selectedNativeScenario === name) {
-    selectedNativeScenarioFound = true;
-    return t.test(name, callback);
-  }
-  return t.test(name, { skip: `not selected by HARBOR_NATIVE_SCENARIO=${selectedNativeScenario}` }, callback);
+  const selection = nativeScenarioSelector.select(name);
+  if (selection.selected) return t.test(name, callback);
+  return t.test(name, { skip: selection.skipReason }, callback);
 }
 
 test("Converted Slice 1 functional Electron acceptance", async (t) => {
@@ -1027,7 +1025,5 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  if (selectedNativeScenario && !selectedNativeScenarioFound) {
-    throw new Error("HARBOR_NATIVE_SCENARIO did not match a registered native scenario");
-  }
+  nativeScenarioSelector.assertMatched();
 });

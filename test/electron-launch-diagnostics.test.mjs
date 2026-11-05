@@ -9,6 +9,7 @@ import {
   commandError,
   collectRunProvenance,
   createBoundedDiagnosticsCapture,
+  createNativeScenarioSelector,
   currentInvocationCommand,
   DEFAULT_COMMAND_TIMEOUT_MS,
   diagnosticsText,
@@ -212,6 +213,36 @@ test("records the Node exec arguments and resolves the test script path", () => 
     "--test",
     "/approved/worktree/e2e/converted-electron.test.mjs",
   ]);
+});
+
+test("selects exactly one native scenario and fails closed for invalid selectors", () => {
+  const defaultSelector = createNativeScenarioSelector(undefined);
+  assert.deepEqual(defaultSelector.select("first"), { selected: true });
+  assert.deepEqual(defaultSelector.select("second"), { selected: true });
+  assert.doesNotThrow(() => defaultSelector.assertMatched());
+
+  const focusedSelector = createNativeScenarioSelector("  second  ");
+  assert.deepEqual(focusedSelector.select("first"), {
+    selected: false,
+    skipReason: "not selected by HARBOR_NATIVE_SCENARIO",
+  });
+  assert.deepEqual(focusedSelector.select("second"), { selected: true });
+  assert.doesNotThrow(() => focusedSelector.assertMatched());
+
+  const unknownSelector = createNativeScenarioSelector("optional diagnostic");
+  assert.deepEqual(unknownSelector.select("first"), {
+    selected: false,
+    skipReason: "not selected by HARBOR_NATIVE_SCENARIO",
+  });
+  assert.throws(
+    () => unknownSelector.assertMatched(),
+    /did not match a registered native scenario/,
+  );
+
+  assert.throws(
+    () => createNativeScenarioSelector("  \t  "),
+    /must be a non-empty scenario name/,
+  );
 });
 
 test("records asynchronous process-stream errors as sanitized diagnostics", () => {

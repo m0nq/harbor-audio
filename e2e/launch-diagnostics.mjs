@@ -247,6 +247,30 @@ export function currentInvocationCommand({
   return [execPath, ...execArgv, ...(resolvedScript ? [resolvedScript, ...argumentsAfterScript] : argumentsAfterScript)];
 }
 
+export function createNativeScenarioSelector(rawSelection) {
+  const selectionProvided = rawSelection !== undefined;
+  const selectedName = selectionProvided ? rawSelection.trim() : undefined;
+  if (selectionProvided && !selectedName) {
+    throw new Error("HARBOR_NATIVE_SCENARIO must be a non-empty scenario name when provided");
+  }
+
+  let selectedScenarioFound = selectedName === undefined;
+  return {
+    select(name) {
+      if (selectedName === undefined || selectedName === name) {
+        selectedScenarioFound = true;
+        return { selected: true };
+      }
+      return { selected: false, skipReason: "not selected by HARBOR_NATIVE_SCENARIO" };
+    },
+    assertMatched() {
+      if (!selectedScenarioFound) {
+        throw new Error("HARBOR_NATIVE_SCENARIO did not match a registered native scenario");
+      }
+    },
+  };
+}
+
 function isSha(value, length) {
   return typeof value === "string" && new RegExp(`^[0-9a-f]{${length}}$`, "i").test(value);
 }
