@@ -123,9 +123,9 @@ async function withElectronLaunch(scenario, callback) {
   let stderrBytes = 0;
   let stderrTruncated = false;
   const listenerDisposers = [];
-  const listen = (target, event, handler) => {
+  const listen = (target, event, handler, { retain = false } = {}) => {
     target.on(event, handler);
-    listenerDisposers.push(() => target.removeListener?.(event, handler));
+    if (!retain) listenerDisposers.push(() => target.removeListener?.(event, handler));
   };
   const markProcessFailure = (error) => {
     recordProcessError(diagnostics, error);
@@ -157,7 +157,7 @@ async function withElectronLaunch(scenario, callback) {
     diagnostics.cleanup.ownershipSource = "electronApp.process()";
     listen(child, "error", (error) => {
       markProcessFailure(error);
-    });
+    }, { retain: true });
     listen(child, "exit", (code, signal) => {
       diagnostics.processExit = { code, signal };
     });
@@ -186,7 +186,7 @@ async function withElectronLaunch(scenario, callback) {
       });
       listen(child.stderr, "error", (error) => {
         markProcessFailure(error);
-      });
+      }, { retain: true });
     }
 
     listen(electronApp, "console", (message) => {

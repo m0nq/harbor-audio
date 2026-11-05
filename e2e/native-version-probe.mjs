@@ -19,6 +19,7 @@ export const VERSION_PROBE_TIMEOUT_MS = 15_000;
 export const VERSION_PROBE_TERMINATION_GRACE_MS = 2_000;
 export const PROCESS_INSPECTION_TIMEOUT_MS = 5_000;
 export const MAX_CAPTURED_OUTPUT_BYTES = MAX_CAPTURED_STREAM_BYTES;
+export const POST_CLOSE_SETTLEMENT_TIMEOUT_MS = 100;
 export const ELECTRON_OVERRIDE_NAMES = [
   "ELECTRON_CACHE",
   "ELECTRON_MIRROR",
@@ -265,7 +266,12 @@ function waitForChild(
   });
 }
 
-function captureOutput(stream, chunks, label, maxBytes = MAX_CAPTURED_OUTPUT_BYTES) {
+function captureOutput(
+  stream,
+  chunks,
+  label,
+  { maxBytes = MAX_CAPTURED_OUTPUT_BYTES, onError } = {},
+) {
   const state = { errors: [], bytesSeen: 0, bytesRetained: 0, truncated: false };
   if (!stream) return state;
   try {
@@ -287,11 +293,19 @@ function captureOutput(stream, chunks, label, maxBytes = MAX_CAPTURED_OUTPUT_BYT
         state.bytesRetained += Buffer.byteLength(retained, "utf8");
       }
       state.truncated = true;
-      state.errors.push(`${label} capture exceeded ${maxBytes} bytes; output truncated`);
+      const error = new Error(`${label} capture exceeded ${maxBytes} bytes; output truncated`);
+      state.errors.push(error.message);
+      onError?.(error);
     });
-    stream.on("error", (error) => state.errors.push(sanitizeDiagnosticsText(errorMessage(error))));
+    stream.on("error", (error) => {
+      const message = sanitizeDiagnosticsText(errorMessage(error));
+      state.errors.push(message);
+      onError?.(error);
+    });
   } catch (error) {
-    state.errors.push(`output capture setup failed: ${sanitizeDiagnosticsText(errorMessage(error))}`);
+    const captureError = new Error(`output capture setup failed: ${sanitizeDiagnosticsText(errorMessage(error))}`);
+    state.errors.push(captureError.message);
+    onError?.(captureError);
   }
   return state;
 }
@@ -660,22 +674,23 @@ export async function runVersionProbe({
     result.errors.push("spawn did not return a child-process handle");
     return result;
   }
+  const markLateProcessFailure = (error) => {
+    const processError = sanitizeDiagnosticsText(errorMessage(error));
+    if (!result.errors.includes(processError)) result.errors.push(processError);
+    if (result.outcome === "PASS") {
+      result.outcome = "FAILURE";
+      result.disposition = "FAILURE";
+      result.startupPhase = "electron-error";
+      result.errors.push("late native process failure observed after close");
+    }
+  };
   const lifecycle = observeChildLifecycle(child, {
-    onLifecycleError(error) {
-      const lifecycleError = sanitizeDiagnosticsText(errorMessage(error));
-      if (!result.errors.includes(lifecycleError)) result.errors.push(lifecycleError);
-      if (result.outcome === "PASS") {
-        result.outcome = "FAILURE";
-        result.disposition = "FAILURE";
-        result.startupPhase = "electron-error";
-        result.errors.push("late native process failure observed after close");
-      }
-    },
+    onLifecycleError: markLateProcessFailure,
   });
   const stdout = [];
   const stderr = [];
-  const stdoutState = captureOutput(child.stdout, stdout, "stdout");
-  const stderrState = captureOutput(child.stderr, stderr, "stderr");
+  const stdoutState = captureOutput(child.stdout, stdout, "stdout", { onError: markLateProcessFailure });
+  const stderrState = captureOutput(child.stderr, stderr, "stderr", { onError: markLateProcessFailure });
   const finalizeOutput = () => {
     const rawStdout = stdout.join("");
     const rawStderr = stderr.join("");
@@ -705,6 +720,18 @@ export async function runVersionProbe({
     }
     return lateFailure;
   };
+  const settleCapturedOutput = async () => {
+    let settlementTimer;
+    await Promise.race([
+      new Promise((resolve) => setImmediate(resolve)),
+      new Promise((resolve) => {
+        settlementTimer = setTimeoutFn(resolve, POST_CLOSE_SETTLEMENT_TIMEOUT_MS);
+      }),
+    ]);
+    if (settlementTimer !== undefined) clearTimeoutFn(settlementTimer);
+    finalizeOutput();
+    finalizeLateFailures();
+  };
   let initialDescendants = [];
   let initialDirectChildVerified = false;
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
@@ -720,8 +747,7 @@ export async function runVersionProbe({
     }
     result.outcome = "INCONCLUSIVE";
     result.disposition = "CLEANUP_FAILURE";
-    appendOutputErrors();
-    finalizeOutput();
+    await settleCapturedOutput();
     result.errors.push("direct child PID was unavailable; descendant cleanup could not be verified");
     lifecycle.dispose?.();
     return result;
@@ -733,8 +759,7 @@ export async function runVersionProbe({
   result.process.ownershipSource = "node-child-process-handle plus ps PID/PPID/command verification";
 
   const cleanupChild = async () => {
-    finalizeLateFailures();
-    finalizeOutput();
+    await settleCapturedOutput();
     let cleanup;
     try {
       cleanup = await terminateOwnedTree({
@@ -758,8 +783,7 @@ export async function runVersionProbe({
         remainingDescendants: [],
       };
     }
-    finalizeLateFailures();
-    finalizeOutput();
+    await settleCapturedOutput();
     result.process.termination = cleanup.errors;
     result.process.descendants = cleanup.remainingDescendants;
     for (const error of cleanup.errors) {
@@ -789,7 +813,7 @@ export async function runVersionProbe({
       result.startupPhase = "ownership-verification";
       result.errors.push("direct child PID/PPID/command verification failed");
       await cleanupChild();
-      finalizeLateFailures();
+      await settleCapturedOutput();
       lifecycle.dispose?.();
       return result;
     }
@@ -805,7 +829,7 @@ export async function runVersionProbe({
       result.startupPhase = timedOut ? "timeout" : "electron-error";
       result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
       await cleanupChild();
-      finalizeLateFailures();
+      await settleCapturedOutput();
       lifecycle.dispose?.();
       return result;
     }
@@ -834,8 +858,7 @@ export async function runVersionProbe({
     await cleanupChild();
   }
 
-  finalizeOutput();
-  finalizeLateFailures();
+  await settleCapturedOutput();
   lifecycle.dispose?.();
   return result;
 }
