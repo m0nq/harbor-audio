@@ -39,6 +39,12 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function sanitizedPublicError(error) {
+  const safeError = new Error(sanitizeDiagnosticsText(errorMessage(error)));
+  if (error instanceof Error && error.stack) safeError.stack = sanitizeDiagnosticsText(error.stack);
+  return safeError;
+}
+
 function recordFromLine(line) {
   const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
   if (!match) return undefined;
@@ -80,9 +86,13 @@ export function descendantsOf(rootPid, records) {
 
 export function isExactDirectChild(record, { childPid, supervisorPid, executable }) {
   if (!record || record.pid !== childPid || record.ppid !== supervisorPid || record.pgid <= 0 || !record.startTime) return false;
-  return record.command === executable
-    || record.command.startsWith(`${executable} `)
-    || record.command.startsWith(`"${executable}" `);
+  return matchesElectronExecutable(record.command, executable);
+}
+
+function matchesElectronExecutable(command, executable) {
+  return command === executable
+    || command.startsWith(`${executable} `)
+    || command.startsWith(`"${executable}" `);
 }
 
 export function buildProbeEnvironment(baseEnvironment = process.env) {
@@ -130,12 +140,14 @@ export async function createPrivateRunRoot({
       try {
         await rmFn(runRoot, { recursive: true, force: true });
       } catch (cleanupError) {
+        const safeSetupError = sanitizedPublicError(error);
+        const safeCleanupError = sanitizedPublicError(cleanupError);
         const retainedError = new Error(
-          `private run-root setup failed: ${errorMessage(error)}; run root retained at ${runRoot} because cleanup failed: ${errorMessage(cleanupError)}`,
-          { cause: error },
+          `private run-root setup failed: ${safeSetupError.message}; run root retained at ${runRoot} because cleanup failed: ${safeCleanupError.message}`,
+          { cause: safeSetupError },
         );
         retainedError.runRoot = runRoot;
-        retainedError.cleanupError = cleanupError;
+        retainedError.cleanupError = safeCleanupError;
         throw retainedError;
       }
     }
@@ -585,13 +597,20 @@ async function terminateOwnedTree({
   let remainingDescendants = [];
   try {
     const remaining = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
+    const lateElectronRecords = remaining.records.filter((record) => (
+      record.pid !== childPid && matchesElectronExecutable(record.command, executable)
+    ));
     verifiedExit = verifiedExit
       && !remaining.directChildVerified
       && !remaining.childRecord
-      && remaining.descendants.length === 0;
-    remainingDescendants = remaining.descendants;
+      && remaining.descendants.length === 0
+      && lateElectronRecords.length === 0;
+    remainingDescendants = [...remaining.descendants, ...lateElectronRecords];
     if (remainingDescendants.length > 0) {
       errors.push("owned descendant processes remain after bounded cleanup");
+    }
+    if (lateElectronRecords.length > 0) {
+      errors.push("matching Electron process records remain after bounded cleanup");
     }
   } catch (error) {
     verifiedExit = false;

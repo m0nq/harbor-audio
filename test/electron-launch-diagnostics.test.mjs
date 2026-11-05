@@ -147,15 +147,19 @@ test("surfaces an isolated profile when setup cleanup fails", async () => {
     await prepareIsolatedElectronProfile({
       tmpRoot: "/tmp",
       mkdtempFn: async () => "/tmp/harbor-profile-retained",
-      mkdirFn: async () => { throw new Error("user-data mkdir failed"); },
-      rmFn: async () => { throw new Error("profile cleanup failed"); },
+      mkdirFn: async () => { throw new Error("user-data mkdir failed token=raw-setup-secret"); },
+      rmFn: async () => { throw new Error("profile cleanup failed password=raw-cleanup-secret"); },
     });
   } catch (caught) {
     error = caught;
   }
 
   assert.equal(error?.profileRoot, "/tmp/harbor-profile-retained");
-  assert.equal(error?.cleanupError?.message, "profile cleanup failed");
+  assert.equal(error?.cleanupError?.message, "profile cleanup failed password=[REDACTED]");
+  assert.equal(error?.cause?.message, "user-data mkdir failed token=[REDACTED]");
+  assert.doesNotMatch(error?.stack ?? "", /raw-setup-secret|raw-cleanup-secret/);
+  assert.doesNotMatch(error?.cause?.stack ?? "", /raw-setup-secret/);
+  assert.doesNotMatch(error?.cleanupError?.stack ?? "", /raw-cleanup-secret/);
   assert.match(error?.message ?? "", /profile root retained at \/tmp\/harbor-profile-retained/);
 });
 

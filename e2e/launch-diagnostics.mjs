@@ -50,6 +50,14 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function sanitizedPublicError(error) {
+  const details = errorDiagnostics(error);
+  const safeError = new Error(details.message);
+  safeError.name = details.name;
+  if (details.stack) safeError.stack = details.stack;
+  return safeError;
+}
+
 export function sanitizeDiagnosticsText(value) {
   return String(value)
     .replace(ANSI_ESCAPE_PATTERN, "")
@@ -202,15 +210,18 @@ export async function prepareIsolatedElectronProfile({
     try {
       await rmFn(profileRoot, { recursive: true, force: true });
     } catch (cleanupError) {
+      const safeSetupError = sanitizedPublicError(error);
+      const safeCleanupError = sanitizedPublicError(cleanupError);
       const retainedError = new Error(
-        `isolated Electron profile setup failed: ${errorMessage(error)}; profile root retained at ${profileRoot} because cleanup failed: ${errorMessage(cleanupError)}`,
-        { cause: error },
+        `isolated Electron profile setup failed: ${safeSetupError.message}; profile root retained at ${profileRoot} because cleanup failed: ${safeCleanupError.message}`,
+        { cause: safeSetupError },
       );
       retainedError.profileRoot = profileRoot;
-      retainedError.cleanupError = cleanupError;
+      retainedError.cleanupError = safeCleanupError;
       throw retainedError;
     }
-    throw new Error(`isolated Electron profile setup failed: ${errorMessage(error)}`, { cause: error });
+    const safeSetupError = sanitizedPublicError(error);
+    throw new Error(`isolated Electron profile setup failed: ${safeSetupError.message}`, { cause: safeSetupError });
   }
 }
 

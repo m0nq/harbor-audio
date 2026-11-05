@@ -118,16 +118,74 @@ test("surfaces a retained native run root when setup cleanup fails", async () =>
       tmpRoot: "/tmp",
       mkdtempFn: async () => "/tmp/harbor-native-root-retained",
       chmodFn: async () => {},
-      validateFn: async () => { throw new Error("run-root validation failed"); },
-      rmFn: async () => { throw new Error("run-root cleanup failed"); },
+      validateFn: async () => { throw new Error("run-root validation failed token=raw-run-secret"); },
+      rmFn: async () => { throw new Error("run-root cleanup failed password=raw-root-secret"); },
     });
   } catch (caught) {
     error = caught;
   }
 
   assert.equal(error?.runRoot, "/tmp/harbor-native-root-retained");
-  assert.equal(error?.cleanupError?.message, "run-root cleanup failed");
+  assert.equal(error?.cleanupError?.message, "run-root cleanup failed password=[REDACTED]");
+  assert.equal(error?.cause?.message, "run-root validation failed token=[REDACTED]");
+  assert.doesNotMatch(error?.stack ?? "", /raw-run-secret|raw-root-secret/);
   assert.match(error?.message ?? "", /run root retained at \/tmp\/harbor-native-root-retained/);
+});
+
+test("does not report PASS when a late Electron helper appears after the initial snapshot", async () => {
+  const child = fakeChild();
+  const executable = "/opt/Electron";
+  const startTime = "Mon Nov  4 12:00:00 2026";
+  const helperPid = 4343;
+  let phase = "child";
+  const processLine = (pid, ppid, command) => (
+    String(pid) + " " + String(ppid) + " " + String(pid) + " " + startTime + " " + command + "\n"
+  );
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p") {
+      const pid = Number(args[1]);
+      if (pid === 100) return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+      if (pid === child.pid && phase === "child") return { stdout: processLine(child.pid, 100, executable + " --version") };
+      if (pid === helperPid && phase === "helper") return { stdout: processLine(helperPid, 1, executable + " Helper") };
+      const error = new Error("process not found");
+      error.code = 1;
+      throw error;
+    }
+    if (args[0] === "-axo") {
+      return {
+        stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+          + (phase === "child" ? processLine(child.pid, 100, executable + " --version") : "")
+          + (phase === "helper" ? processLine(helperPid, 1, executable + " Helper") : ""),
+      };
+    }
+    throw new Error("unexpected ps invocation");
+  };
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        phase = "helper";
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("data", "44.7.0\n");
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+    execFileFn,
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(result.process.descendants.map((record) => record.pid), [helperPid]);
+  assert.match(result.errors.join("\n"), /matching Electron process records remain/);
 });
 
 test("returns PASS for an exact version with verified direct-child cleanup", async () => {
