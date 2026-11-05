@@ -505,6 +505,36 @@ test("forced termination is followed by bounded exit verification before cleanup
   assert.equal(removed, false);
 });
 
+test("bounds Electron close before attempting exit verification", async () => {
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  const diagnostics = diagnosticsFixture();
+  let removed = false;
+
+  const result = await finalizeDiagnostics({
+    diagnostics,
+    electronApp: { close: () => new Promise(() => {}) },
+    child,
+    passed: true,
+    profileRoot: "/tmp/harbor-profile",
+    timeout: 1,
+    killVerificationTimeout: 1,
+    waitForExit: async () => {
+      child.exitCode = 0;
+      diagnostics.cleanup.closeObserved = true;
+      child.emit("close");
+    },
+    removeProfile: async () => {
+      removed = true;
+    },
+  });
+
+  assert.match(result.cleanupErrors.map((error) => error.message).join("\n"), /Electron close exceeded/);
+  assert.equal(result.removedProfile, false);
+  assert.equal(removed, false);
+});
+
 test("waits for close even when the child exit code is already available", async () => {
   const child = new EventEmitter();
   child.exitCode = 0;

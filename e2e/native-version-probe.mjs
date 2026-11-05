@@ -153,7 +153,7 @@ function childExited(child) {
   return Boolean(child && (child.exitCode !== null || child.signalCode !== null));
 }
 
-function observeChildLifecycle(child) {
+function observeChildLifecycle(child, { onLifecycleError } = {}) {
   const state = {
     exitObserved: childExited(child),
     exitObservation: childExited(child)
@@ -174,14 +174,15 @@ function observeChildLifecycle(child) {
   };
   const onError = (error) => {
     state.error ??= error;
+    onLifecycleError?.(error);
   };
   child.on?.("exit", onExit);
   child.on?.("close", onClose);
   child.on?.("error", onError);
-  state.dispose = () => {
+  state.dispose = ({ retainErrorListener = true } = {}) => {
     child.removeListener?.("exit", onExit);
     child.removeListener?.("close", onClose);
-    child.removeListener?.("error", onError);
+    if (!retainErrorListener) child.removeListener?.("error", onError);
   };
   return state;
 }
@@ -489,7 +490,11 @@ async function terminateOwnedTree({
           execFileFn,
           allowReparented: true,
         }));
-        killDirectChildHandle(child, "SIGKILL", errors);
+        if (conflictingDirectChild) {
+          errors.push("conflicting direct-child process identity; no handle signal sent");
+        } else {
+          killDirectChildHandle(child, "SIGKILL", errors);
+        }
       } else if (initialDescendants.length > 0) {
         errors.push(...await signalVerifiedDescendants({
           records: initialDescendants,
@@ -499,14 +504,18 @@ async function terminateOwnedTree({
           allowReparented: true,
         }));
         if (initialDirectChildVerified && !childExited(child)) {
-          if (current.childRecord) {
+          if (conflictingDirectChild || current.childRecord) {
             errors.push("conflicting direct-child process identity; no handle signal sent");
           } else {
             killDirectChildHandle(child, "SIGKILL", errors);
           }
         }
       } else if (!current.childRecord) {
-        killDirectChildHandle(child, "SIGKILL", errors);
+        if (conflictingDirectChild) {
+          errors.push("conflicting direct-child process identity; no handle signal sent");
+        } else {
+          killDirectChildHandle(child, "SIGKILL", errors);
+        }
       } else {
         errors.push("direct child identity could not be verified for escalation; no SIGKILL sent");
       }
@@ -651,7 +660,18 @@ export async function runVersionProbe({
     result.errors.push("spawn did not return a child-process handle");
     return result;
   }
-  const lifecycle = observeChildLifecycle(child);
+  const lifecycle = observeChildLifecycle(child, {
+    onLifecycleError(error) {
+      const lifecycleError = sanitizeDiagnosticsText(errorMessage(error));
+      if (!result.errors.includes(lifecycleError)) result.errors.push(lifecycleError);
+      if (result.outcome === "PASS") {
+        result.outcome = "FAILURE";
+        result.disposition = "FAILURE";
+        result.startupPhase = "electron-error";
+        result.errors.push("late native process failure observed after close");
+      }
+    },
+  });
   const stdout = [];
   const stderr = [];
   const stdoutState = captureOutput(child.stdout, stdout, "stdout");
@@ -737,8 +757,6 @@ export async function runVersionProbe({
         verifiedExit: false,
         remainingDescendants: [],
       };
-    } finally {
-      lifecycle.dispose?.();
     }
     finalizeLateFailures();
     finalizeOutput();
@@ -771,6 +789,8 @@ export async function runVersionProbe({
       result.startupPhase = "ownership-verification";
       result.errors.push("direct child PID/PPID/command verification failed");
       await cleanupChild();
+      finalizeLateFailures();
+      lifecycle.dispose?.();
       return result;
     }
 
@@ -785,6 +805,8 @@ export async function runVersionProbe({
       result.startupPhase = timedOut ? "timeout" : "electron-error";
       result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
       await cleanupChild();
+      finalizeLateFailures();
+      lifecycle.dispose?.();
       return result;
     }
 
@@ -814,6 +836,7 @@ export async function runVersionProbe({
 
   finalizeOutput();
   finalizeLateFailures();
+  lifecycle.dispose?.();
   return result;
 }
 

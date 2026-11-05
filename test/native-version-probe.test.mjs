@@ -324,7 +324,7 @@ test("classifies an asynchronous child error as failure when cleanup is verified
   assert.equal(result.disposition, "FAILURE");
   assert.match(result.errors.join("\n"), /spawn denied/);
   assert.match(result.errors.join("\n"), /stderr capture failed before child error/);
-  assert.equal(child.listenerCount("error"), 0);
+  assert.equal(child.listenerCount("error"), 1);
   assert.equal(child.listenerCount("exit"), 0);
   assert.equal(child.listenerCount("close"), 0);
 });
@@ -835,6 +835,67 @@ test("never signals the launch handle after a conflicting child identity appears
         stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
           + processLine(child.pid, childPpid, executable + " --version"),
       };
+    }
+    throw new Error("unexpected ps invocation");
+  };
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    timeoutMs: 1,
+    graceMs: 1,
+    spawnFn: () => child,
+    execFileFn,
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(signals, []);
+  assert.match(result.errors.join("\n"), /conflicting direct-child process identity/);
+});
+
+test("never escalates the launch handle after a conflicting identity with descendants", async () => {
+  const child = fakeChild();
+  const signals = [];
+  const executable = "/opt/Electron";
+  const descendantPid = 4343;
+  let tableCalls = 0;
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+  const processLine = (pid, ppid, command) => (
+    `${pid} ${ppid} ${pid} Mon Nov  4 12:00:00 2026 ${command}\n`
+  );
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p" && Number(args[1]) === 100) {
+      return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+    }
+    if (args[0] === "-p" && Number(args[1]) === descendantPid) {
+      const error = new Error("process not found");
+      error.code = 1;
+      throw error;
+    }
+    if (args[0] === "-axo") {
+      tableCalls += 1;
+      if (tableCalls === 1) {
+        return {
+          stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+            + processLine(child.pid, 100, executable + " --version")
+            + processLine(descendantPid, child.pid, executable + " Helper"),
+        };
+      }
+      if (tableCalls === 2) {
+        return {
+          stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+            + processLine(child.pid, 999, executable + " --version"),
+        };
+      }
+      return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
     }
     throw new Error("unexpected ps invocation");
   };

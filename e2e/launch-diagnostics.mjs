@@ -551,7 +551,17 @@ export async function finalizeDiagnostics({
       child && (!isProcessExited(child) || !diagnostics.cleanup.closeObserved)
     );
     try {
-      await electronApp.close();
+      let closeTimer;
+      try {
+        await Promise.race([
+          Promise.resolve().then(() => electronApp.close()),
+          new Promise((_, reject) => {
+            closeTimer = setTimeout(() => reject(new Error(`Electron close exceeded ${timeout}ms`)), timeout);
+          }),
+        ]);
+      } finally {
+        if (closeTimer) clearTimeout(closeTimer);
+      }
     } catch (error) {
       cleanupErrors.push(error);
       recordDiagnosticError(diagnostics, error);
