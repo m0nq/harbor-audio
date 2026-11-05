@@ -87,6 +87,18 @@ test("redacts credentials split across diagnostic chunks", () => {
   assert.doesNotMatch(sanitized, /split-secret|split-token/);
 });
 
+test("preserves ordinary provenance array structure while sanitizing stream arrays", () => {
+  const sanitized = JSON.parse(diagnosticsText({
+    changedFiles: ["README.md", "e2e/launch-diagnostics.mjs"],
+    invocation: { command: ["node", "e2e/native-version-probe.mjs"] },
+    processErrors: ["token=", "split-token"],
+  }));
+
+  assert.deepEqual(sanitized.changedFiles, ["README.md", "e2e/launch-diagnostics.mjs"]);
+  assert.deepEqual(sanitized.invocation.command, ["node", "e2e/native-version-probe.mjs"]);
+  assert.equal(sanitized.processErrors, "token=[REDACTED]");
+});
+
 test("requires an independently supplied canonical worktree expectation", () => {
   const { expected, missing } = expectedProvenanceFromEnvironment({
     worktree: "/derived/worktree",

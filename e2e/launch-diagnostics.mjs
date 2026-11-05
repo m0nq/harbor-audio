@@ -31,6 +31,12 @@ const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
 const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
 const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+[^\s:;,]+\s+)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
+const STREAM_CHUNK_ARRAY_KEYS = new Set([
+  "processErrors",
+  "electronConsole",
+  "pageConsole",
+  "pageErrors",
+]);
 const execFile = promisify(defaultExecFile);
 
 function errorMessage(error) {
@@ -54,7 +60,7 @@ export function sanitizeDiagnosticsValue(value, key = "") {
   if (SENSITIVE_KEY_PATTERN.test(key)) return "[REDACTED]";
   if (typeof value === "string") return sanitizeDiagnosticsText(value);
   if (Array.isArray(value)) {
-    if (value.length > 0 && value.every((entry) => typeof entry === "string")) {
+    if (STREAM_CHUNK_ARRAY_KEYS.has(key) && value.length > 0 && value.every((entry) => typeof entry === "string")) {
       return sanitizeDiagnosticsText(value.join(""));
     }
     return value.map((entry) => sanitizeDiagnosticsValue(entry));
