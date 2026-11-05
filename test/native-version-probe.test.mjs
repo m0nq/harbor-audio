@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   buildProbeEnvironment,
+  createPrivateRunRoot,
   descendantsOf,
   isExactDirectChild,
   MAX_CAPTURED_OUTPUT_BYTES,
@@ -108,6 +109,25 @@ test("validates a private mode-700 run root", async () => {
   } finally {
     await rm(runRoot, { recursive: true, force: true });
   }
+});
+
+test("surfaces a retained native run root when setup cleanup fails", async () => {
+  let error;
+  try {
+    await createPrivateRunRoot({
+      tmpRoot: "/tmp",
+      mkdtempFn: async () => "/tmp/harbor-native-root-retained",
+      chmodFn: async () => {},
+      validateFn: async () => { throw new Error("run-root validation failed"); },
+      rmFn: async () => { throw new Error("run-root cleanup failed"); },
+    });
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.equal(error?.runRoot, "/tmp/harbor-native-root-retained");
+  assert.equal(error?.cleanupError?.message, "run-root cleanup failed");
+  assert.match(error?.message ?? "", /run root retained at \/tmp\/harbor-native-root-retained/);
 });
 
 test("returns PASS for an exact version with verified direct-child cleanup", async () => {

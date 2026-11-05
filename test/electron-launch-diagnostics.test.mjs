@@ -708,7 +708,7 @@ test("profile-removal failure is persisted before the profile is retained", asyn
 });
 
 test("primary failure remains the cause when cleanup and persistence also fail", () => {
-  const primary = new Error("renderer assertion failed");
+  const primary = new Error("renderer assertion failed token=raw-secret");
   const cleanup = new Error("close failed");
   const persistence = new Error("write failed");
   const failure = buildFailureError({
@@ -718,8 +718,11 @@ test("primary failure remains the cause when cleanup and persistence also fail",
     persistenceError: persistence,
   });
 
-  assert.equal(failure.cause, primary);
-  assert.match(failure.message, /renderer assertion failed/);
+  assert.notEqual(failure.cause, primary);
+  assert.match(failure.cause.message, /renderer assertion failed token=\[REDACTED\]/);
+  assert.doesNotMatch(failure.cause.message, /raw-secret/);
+  assert.doesNotMatch(failure.cause.stack ?? "", /raw-secret/);
+  assert.match(failure.message, /renderer assertion failed token=\[REDACTED\]/);
   assert.match(failure.message, /diagnostics\.json/);
   assert.deepEqual(
     failure.secondaryErrors.map((error) => error.message),

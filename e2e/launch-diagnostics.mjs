@@ -749,12 +749,15 @@ export function buildFailureError({
   ];
   if (!primaryError && secondaryErrors.length === 0) return undefined;
 
-  const cause = primaryError ?? secondaryErrors[0];
+  const cause = errorDiagnostics(primaryError ?? secondaryErrors[0]);
+  const publicCause = new Error(cause.message);
+  publicCause.name = cause.name;
+  if (cause.stack) publicCause.stack = cause.stack;
   const baseMessage = primaryError
-    ? errorMessage(primaryError)
-    : `Electron E2E finalization failed: ${errorMessage(cause)}`;
+    ? cause.message
+    : `Electron E2E finalization failed: ${cause.message}`;
   const message = `${sanitizeDiagnosticsText(baseMessage)}\nElectron E2E diagnostics: ${diagnosticsPath ?? "unavailable"}`;
-  const failure = new Error(message, { cause });
+  const failure = new Error(message, { cause: publicCause });
   failure.secondaryErrors = secondaryErrors.map(errorDiagnostics);
   return failure;
 }

@@ -113,14 +113,32 @@ export async function validatePrivateRunRoot(
   return resolvedRoot;
 }
 
-export async function createPrivateRunRoot({ tmpRoot = os.tmpdir() } = {}) {
+export async function createPrivateRunRoot({
+  tmpRoot = os.tmpdir(),
+  mkdtempFn = mkdtemp,
+  chmodFn = chmod,
+  validateFn = validatePrivateRunRoot,
+  rmFn = rm,
+} = {}) {
   let runRoot;
   try {
-    runRoot = await mkdtemp(path.join(tmpRoot, "harbor-native-version-"));
-    await chmod(runRoot, 0o700);
-    return await validatePrivateRunRoot(runRoot);
+    runRoot = await mkdtempFn(path.join(tmpRoot, "harbor-native-version-"));
+    await chmodFn(runRoot, 0o700);
+    return await validateFn(runRoot);
   } catch (error) {
-    if (runRoot) await rm(runRoot, { recursive: true, force: true }).catch(() => {});
+    if (runRoot) {
+      try {
+        await rmFn(runRoot, { recursive: true, force: true });
+      } catch (cleanupError) {
+        const retainedError = new Error(
+          `private run-root setup failed: ${errorMessage(error)}; run root retained at ${runRoot} because cleanup failed: ${errorMessage(cleanupError)}`,
+          { cause: error },
+        );
+        retainedError.runRoot = runRoot;
+        retainedError.cleanupError = cleanupError;
+        throw retainedError;
+      }
+    }
     throw error;
   }
 }
@@ -920,6 +938,7 @@ async function main() {
       expectedProvenance,
     });
   } catch (error) {
+    runRoot ??= error?.runRoot;
     result = {
       outcome: "HOLD",
       startupPhase: "preflight",
