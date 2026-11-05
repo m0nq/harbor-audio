@@ -8,6 +8,7 @@ import {
   buildProbeEnvironment,
   descendantsOf,
   isExactDirectChild,
+  MAX_CAPTURED_OUTPUT_BYTES,
   parseProcessTable,
   persistProbeResult,
   PROCESS_INSPECTION_TIMEOUT_MS,
@@ -576,6 +577,41 @@ test("joins and sanitizes complete stdout and stderr streams before retaining th
   assert.match(result.stdout, /Authorization Foo\+Bar \[REDACTED\]/);
   assert.match(result.stderr, /clientSecret=\[REDACTED\]/);
   assert.doesNotMatch(result.stdout + result.stderr, /split-secret|stderr-secret/);
+});
+
+test("bounds retained version-probe output and records truncation", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        childAlive = false;
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("data", "x".repeat(MAX_CAPTURED_OUTPUT_BYTES + 128));
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "FAILURE");
+  assert.equal(Buffer.byteLength(result.stdout, "utf8"), MAX_CAPTURED_OUTPUT_BYTES);
+  assert.match(result.errors.join("\n"), /stdout capture exceeded/);
 });
 
 test("treats a stdout capture error as a primary failure and still verifies cleanup", async () => {

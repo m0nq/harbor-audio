@@ -16,6 +16,7 @@ export const EXPECTED_ELECTRON_VERSION = "44.7.0";
 export const VERSION_PROBE_TIMEOUT_MS = 15_000;
 export const VERSION_PROBE_TERMINATION_GRACE_MS = 2_000;
 export const PROCESS_INSPECTION_TIMEOUT_MS = 5_000;
+export const MAX_CAPTURED_OUTPUT_BYTES = 1024 * 1024;
 export const ELECTRON_OVERRIDE_NAMES = [
   "ELECTRON_CACHE",
   "ELECTRON_MIRROR",
@@ -261,12 +262,30 @@ function waitForChild(
   });
 }
 
-function captureOutput(stream, chunks) {
-  const state = { errors: [] };
+function captureOutput(stream, chunks, label, maxBytes = MAX_CAPTURED_OUTPUT_BYTES) {
+  const state = { errors: [], bytesSeen: 0, bytesRetained: 0, truncated: false };
   if (!stream) return state;
   try {
     stream.setEncoding?.("utf8");
-    stream.on("data", (chunk) => chunks.push(String(chunk)));
+    stream.on("data", (chunk) => {
+      if (state.truncated) return;
+      const text = String(chunk);
+      const bytes = Buffer.byteLength(text, "utf8");
+      state.bytesSeen += bytes;
+      const remaining = maxBytes - state.bytesRetained;
+      if (bytes <= remaining) {
+        chunks.push(text);
+        state.bytesRetained += bytes;
+        return;
+      }
+      if (remaining > 0) {
+        const retained = Buffer.from(text, "utf8").subarray(0, remaining).toString("utf8");
+        chunks.push(retained);
+        state.bytesRetained += Buffer.byteLength(retained, "utf8");
+      }
+      state.truncated = true;
+      state.errors.push(`${label} capture exceeded ${maxBytes} bytes; output truncated`);
+    });
     stream.on("error", (error) => state.errors.push(sanitizeDiagnosticsText(errorMessage(error))));
   } catch (error) {
     state.errors.push(`output capture setup failed: ${sanitizeDiagnosticsText(errorMessage(error))}`);
@@ -601,8 +620,8 @@ export async function runVersionProbe({
   const lifecycle = observeChildLifecycle(child);
   const stdout = [];
   const stderr = [];
-  const stdoutState = captureOutput(child.stdout, stdout);
-  const stderrState = captureOutput(child.stderr, stderr);
+  const stdoutState = captureOutput(child.stdout, stdout, "stdout");
+  const stderrState = captureOutput(child.stderr, stderr, "stderr");
   const finalizeOutput = () => {
     const rawStdout = stdout.join("");
     const rawStderr = stderr.join("");
@@ -797,7 +816,6 @@ async function main() {
         repoRoot,
         "node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
       ),
-      command: process.argv,
     });
     result = await runVersionProbe({
       repoRoot,

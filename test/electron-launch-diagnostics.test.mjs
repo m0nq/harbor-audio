@@ -7,6 +7,7 @@ import { test } from "node:test";
 import {
   buildFailureError,
   collectRunProvenance,
+  currentInvocationCommand,
   DEFAULT_COMMAND_TIMEOUT_MS,
   diagnosticsText,
   finalizeDiagnostics,
@@ -63,6 +64,31 @@ test("redacts complete delimiter and authorization credential forms", () => {
   assert.match(sanitized, /Authorization 123 \[REDACTED\]/);
   assert.match(sanitized, /Authorization !custom \[REDACTED\]/);
   assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret|custom-secret|plus-secret|numeric-secret|punctuation-secret/);
+});
+
+test("redacts space-delimited CLI credential arguments", () => {
+  const sanitized = sanitizeDiagnosticsText(
+    "--token raw-cli-token --clientSecret raw-cli-secret --authorization-token=raw-cli-auth --keep retained",
+  );
+
+  assert.match(sanitized, /--token \[REDACTED\]/);
+  assert.match(sanitized, /--clientSecret \[REDACTED\]/);
+  assert.match(sanitized, /--authorization-token=\[REDACTED\]/);
+  assert.match(sanitized, /--keep retained/);
+  assert.doesNotMatch(sanitized, /raw-cli-token|raw-cli-secret|raw-cli-auth/);
+});
+
+test("records the Node exec arguments and resolves the test script path", () => {
+  assert.deepEqual(currentInvocationCommand({
+    execPath: "/opt/homebrew/bin/node",
+    execArgv: ["--test"],
+    argv: ["/opt/homebrew/bin/node", "e2e/converted-electron.test.mjs"],
+    cwd: "/approved/worktree",
+  }), [
+    "/opt/homebrew/bin/node",
+    "--test",
+    "/approved/worktree/e2e/converted-electron.test.mjs",
+  ]);
 });
 
 test("redacts nested and escaped JSON credentials in diagnostic text", () => {

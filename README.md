@@ -113,7 +113,7 @@ env \
   HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256='<approved-package-json-sha256>' \
   HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256='<approved-lockfile-sha256>' \
   HARBOR_NATIVE_EXPECTED_BRANCH_STATUS='## <approved-branch-status>' \
-  HARBOR_NATIVE_EXPECTED_INVOCATION='["/opt/homebrew/bin/node","e2e/native-version-probe.mjs"]' \
+  HARBOR_NATIVE_EXPECTED_INVOCATION='["/opt/homebrew/bin/node","<approved-worktree-path>/e2e/native-version-probe.mjs"]' \
   /opt/homebrew/bin/node e2e/native-version-probe.mjs
 ```
 
@@ -131,7 +131,9 @@ full GUI suite until the probe is a verified `PASS`.
 
 The full GUI suite must use the same exact provenance values but set
 `HARBOR_NATIVE_EXPECTED_INVOCATION` to
-`["/opt/homebrew/bin/node","--test","e2e/converted-electron.test.mjs"]`.
+`["/opt/homebrew/bin/node","--test","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
+Replace `<approved-worktree-path>` with the exact canonical worktree path;
+the harness records Node's `--test` exec argument and the resolved test path.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only

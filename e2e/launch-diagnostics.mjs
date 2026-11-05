@@ -11,7 +11,7 @@ export const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
 const SENSITIVE_NAME_PATTERN = "(?:(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*|[A-Za-z0-9]*?(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)[A-Za-z0-9]*)";
-const SENSITIVE_ASSIGNMENT_PREFIX = "(\\b" + SENSITIVE_NAME_PATTERN + "\\b\\s*[:=]\\s*)";
+const SENSITIVE_ASSIGNMENT_PREFIX = "((?<!-)\\b" + SENSITIVE_NAME_PATTERN + "\\b\\s*[:=]\\s*)";
 const DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   SENSITIVE_ASSIGNMENT_PREFIX + '("[^"]*")',
   "gi",
@@ -28,8 +28,12 @@ const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   SENSITIVE_ASSIGNMENT_PREFIX + "(?![\"'])([^\\r\\n;]*)(?=;|\\r?\\n|$)",
   "gi",
 );
-const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
-const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+[^\s:;,]+\s+)[^\r\n;]*/gi;
+const CLI_SENSITIVE_ARGUMENT_PATTERN = new RegExp(
+  "(--" + SENSITIVE_NAME_PATTERN + "(?:=|\\s+))(\"[^\"]*\"|'[^']*'|[^\\s;\\r\\n]+)",
+  "gi",
+);
+const AUTHORIZATION_PATTERN = /(\bauthorization(?=$|[\s:=])\s*[:=]\s*)[^\r\n;]*/gi;
+const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization(?=$|[\s:=])\s+[^\s:;,]+\s+)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 const STREAM_CHUNK_ARRAY_KEYS = new Set([
   "processErrors",
@@ -50,6 +54,7 @@ export function sanitizeDiagnosticsText(value) {
     .replace(DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN, '$1"[REDACTED]"')
     .replace(SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN, "$1'[REDACTED]'")
     .replace(UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN, "$1[REDACTED]")
+    .replace(CLI_SENSITIVE_ARGUMENT_PATTERN, "$1[REDACTED]")
     .replace(BEARER_PATTERN, "$1[REDACTED]")
     .replace(AUTHORIZATION_SCHEME_PATTERN, "$1[REDACTED]")
     .replace(AUTHORIZATION_PATTERN, "$1[REDACTED]")
@@ -107,6 +112,20 @@ function firstMatch(value, pattern) {
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function currentInvocationCommand({
+  execPath = process.execPath,
+  execArgv = process.execArgv,
+  argv = process.argv,
+  cwd = process.cwd(),
+} = {}) {
+  if (!Array.isArray(execArgv) || !Array.isArray(argv) || !isNonEmptyString(execPath)) return [];
+  const [script, ...argumentsAfterScript] = argv.slice(1);
+  const resolvedScript = isNonEmptyString(script) && !path.isAbsolute(script)
+    ? path.resolve(cwd, script)
+    : script;
+  return [execPath, ...execArgv, ...(resolvedScript ? [resolvedScript, ...argumentsAfterScript] : argumentsAfterScript)];
 }
 
 function isSha(value, length) {
@@ -256,7 +275,7 @@ export async function collectRunProvenance({
   electronPackageJson,
   playwrightPackageJson,
   baseRef,
-  command = process.argv,
+  command = currentInvocationCommand(),
   execFileFn = execFile,
   readFileFn = defaultReadFile,
 } = {}) {
