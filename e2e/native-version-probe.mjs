@@ -403,8 +403,12 @@ async function terminateOwnedTree({
 }) {
   const errors = [];
   let ownership;
+  let conflictingDirectChild = false;
   try {
     ownership = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
+    conflictingDirectChild = initialDirectChildVerified
+      && !ownership.directChildVerified
+      && Boolean(ownership.childRecord);
     const descendantSnapshot = new Map(
       [...initialDescendants, ...(ownership.directChildVerified ? ownership.descendants : [])]
         .map((record) => [record.pid, record]),
@@ -431,14 +435,22 @@ async function terminateOwnedTree({
         allowReparented: true,
       }));
       if ((ownership.directChildVerified || initialDirectChildVerified) && !childExited(child)) {
-        killDirectChildHandle(child, "SIGTERM", errors);
+        if (conflictingDirectChild) {
+          errors.push("conflicting direct-child process identity; no handle signal sent");
+        } else {
+          killDirectChildHandle(child, "SIGTERM", errors);
+        }
       }
     }
   } catch (error) {
     errors.push(sanitizeDiagnosticsText(errorMessage(error)));
     if (!childExited(child)) {
       errors.push("process table unavailable; no descendant PID signal sent");
-      killDirectChildHandle(child, "SIGTERM", errors);
+      if (conflictingDirectChild) {
+        errors.push("conflicting direct-child process identity; no handle signal sent");
+      } else {
+        killDirectChildHandle(child, "SIGTERM", errors);
+      }
     }
   }
 
@@ -448,8 +460,12 @@ async function terminateOwnedTree({
     } catch (error) {
       errors.push(sanitizeDiagnosticsText(errorMessage(error)));
       if (!childExited(child)) {
-        errors.push("process table unavailable for escalation; no descendant PID signal sent");
-        killDirectChildHandle(child, "SIGKILL", errors);
+        if (conflictingDirectChild) {
+          errors.push("conflicting direct-child process identity; no handle signal sent");
+        } else {
+          errors.push("process table unavailable for escalation; no descendant PID signal sent");
+          killDirectChildHandle(child, "SIGKILL", errors);
+        }
       }
     }
   }
@@ -457,6 +473,11 @@ async function terminateOwnedTree({
   if (!childExited(child)) {
     try {
       const current = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
+      conflictingDirectChild = conflictingDirectChild || (
+        initialDirectChildVerified
+        && !current.directChildVerified
+        && Boolean(current.childRecord)
+      );
       if (current.directChildVerified) {
         const descendantSnapshot = new Map(
           [...initialDescendants, ...current.descendants].map((record) => [record.pid, record]),
@@ -478,7 +499,11 @@ async function terminateOwnedTree({
           allowReparented: true,
         }));
         if (initialDirectChildVerified && !childExited(child)) {
-          killDirectChildHandle(child, "SIGKILL", errors);
+          if (current.childRecord) {
+            errors.push("conflicting direct-child process identity; no handle signal sent");
+          } else {
+            killDirectChildHandle(child, "SIGKILL", errors);
+          }
         }
       } else if (!current.childRecord) {
         killDirectChildHandle(child, "SIGKILL", errors);
@@ -488,8 +513,12 @@ async function terminateOwnedTree({
     } catch (error) {
       errors.push(sanitizeDiagnosticsText(errorMessage(error)));
       if (!childExited(child)) {
-        errors.push("process table unavailable for escalation; no descendant PID signal sent");
-        killDirectChildHandle(child, "SIGKILL", errors);
+        if (conflictingDirectChild) {
+          errors.push("conflicting direct-child process identity; no handle signal sent");
+        } else {
+          errors.push("process table unavailable for escalation; no descendant PID signal sent");
+          killDirectChildHandle(child, "SIGKILL", errors);
+        }
       }
     }
   }
@@ -641,6 +670,21 @@ export async function runVersionProbe({
     }
     return outputErrors;
   };
+  const finalizeLateFailures = () => {
+    let lateFailure = appendOutputErrors().length > 0;
+    if (lifecycle.error) {
+      const lifecycleError = sanitizeDiagnosticsText(errorMessage(lifecycle.error));
+      if (!result.errors.includes(lifecycleError)) result.errors.push(lifecycleError);
+      lateFailure = true;
+    }
+    if (lateFailure && result.outcome === "PASS") {
+      result.outcome = "FAILURE";
+      result.disposition = "FAILURE";
+      result.startupPhase = "electron-error";
+      result.errors.push("late native process failure observed after close");
+    }
+    return lateFailure;
+  };
   let initialDescendants = [];
   let initialDirectChildVerified = false;
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
@@ -669,7 +713,7 @@ export async function runVersionProbe({
   result.process.ownershipSource = "node-child-process-handle plus ps PID/PPID/command verification";
 
   const cleanupChild = async () => {
-    appendOutputErrors();
+    finalizeLateFailures();
     finalizeOutput();
     let cleanup;
     try {
@@ -696,7 +740,7 @@ export async function runVersionProbe({
     } finally {
       lifecycle.dispose?.();
     }
-    appendOutputErrors();
+    finalizeLateFailures();
     finalizeOutput();
     result.process.termination = cleanup.errors;
     result.process.descendants = cleanup.remainingDescendants;
@@ -769,6 +813,7 @@ export async function runVersionProbe({
   }
 
   finalizeOutput();
+  finalizeLateFailures();
   return result;
 }
 

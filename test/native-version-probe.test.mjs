@@ -147,6 +147,42 @@ test("returns PASS for an exact version with verified direct-child cleanup", asy
   assert.equal(result.process.termination.length, 0);
 });
 
+test("downgrades a version result when a lifecycle error arrives after close", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        childAlive = false;
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("data", "v44.7.0\n");
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+        queueMicrotask(() => child.emit("error", new Error("late child error")));
+      });
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "FAILURE");
+  assert.equal(result.disposition, "FAILURE");
+  assert.match(result.errors.join("\n"), /late child error/);
+});
+
 test("times out and signals only the verified child PID, never its process group", async () => {
   const child = fakeChild();
   let childAlive = true;
@@ -773,6 +809,52 @@ test("uses the launch handle when ps has no record for the still-live direct chi
   assert.equal(result.disposition, "CLEANUP_FAILURE");
   assert.deepEqual(signals, ["SIGTERM"]);
   assert.match(result.errors.join("\n"), /direct child identity could not be reverified/);
+});
+
+test("never signals the launch handle after a conflicting child identity appears", async () => {
+  const child = fakeChild();
+  const signals = [];
+  const executable = "/opt/Electron";
+  let tableCalls = 0;
+  child.kill = (signal) => {
+    signals.push(signal);
+    return true;
+  };
+  const processLine = (pid, ppid, command) => (
+    `${pid} ${ppid} ${pid} Mon Nov  4 12:00:00 2026 ${command}\n`
+  );
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p" && Number(args[1]) === 100) {
+      return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+    }
+    if (args[0] === "-axo") {
+      tableCalls += 1;
+      const childPpid = tableCalls === 1 ? 100 : 999;
+      return {
+        stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+          + processLine(child.pid, childPpid, executable + " --version"),
+      };
+    }
+    throw new Error("unexpected ps invocation");
+  };
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    timeoutMs: 1,
+    graceMs: 1,
+    spawnFn: () => child,
+    execFileFn,
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(signals, []);
+  assert.match(result.errors.join("\n"), /conflicting direct-child process identity/);
 });
 
 test("does not report PASS when the child exits before ownership can be observed", async () => {

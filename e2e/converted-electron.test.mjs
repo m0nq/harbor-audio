@@ -224,7 +224,7 @@ async function withElectronLaunch(scenario, callback) {
     diagnostics.startupPhase = "application-workflow";
     diagnostics.disposition = "PASS";
   } catch (error) {
-    primaryError = error;
+    primaryError ??= error;
     diagnostics.launchError = errorDiagnostics(error);
     diagnostics.cleanup.launchProcess = launchProcessDiagnostics(error);
     if (!electronApp) {
