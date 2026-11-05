@@ -31,11 +31,14 @@ function errorMessage(error) {
 function recordFromLine(line) {
   const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
   if (!match) return undefined;
+  const startMatch = match[4].match(/^([A-Z][a-z]{2}\s+[A-Z][a-z]{2}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+)$/);
+  if (!startMatch) return undefined;
   return {
     pid: Number(match[1]),
     ppid: Number(match[2]),
     pgid: Number(match[3]),
-    command: match[4].trim(),
+    startTime: startMatch[1],
+    command: startMatch[2].trim(),
   };
 }
 
@@ -65,7 +68,7 @@ export function descendantsOf(rootPid, records) {
 }
 
 export function isExactDirectChild(record, { childPid, supervisorPid, executable }) {
-  if (!record || record.pid !== childPid || record.ppid !== supervisorPid || record.pgid <= 0) return false;
+  if (!record || record.pid !== childPid || record.ppid !== supervisorPid || record.pgid <= 0 || !record.startTime) return false;
   return record.command === executable
     || record.command.startsWith(`${executable} `)
     || record.command.startsWith(`"${executable}" `);
@@ -107,7 +110,7 @@ export async function createPrivateRunRoot({ tmpRoot = os.tmpdir() } = {}) {
 
 async function processRecord(pid, execFileFn) {
   try {
-    const result = await execFileFn("/bin/ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,command="], {
+    const result = await execFileFn("/bin/ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,lstart=,command="], {
       maxBuffer: 1024 * 1024,
     });
     return parseProcessTable(result.stdout)[0];
@@ -118,7 +121,7 @@ async function processRecord(pid, execFileFn) {
 }
 
 async function processTable(execFileFn) {
-  const result = await execFileFn("/bin/ps", ["-axo", "pid=,ppid=,pgid=,command="], {
+  const result = await execFileFn("/bin/ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="], {
     maxBuffer: 4 * 1024 * 1024,
   });
   return parseProcessTable(result.stdout);
@@ -204,6 +207,7 @@ async function signalVerifiedDescendants({ records, signal, killFn, execFileFn }
         && current.pid === record.pid
         && current.ppid === record.ppid
         && current.pgid === record.pgid
+        && current.startTime === record.startTime
         && current.command === record.command;
       if (!sameProcess) {
         errors.push("descendant PID " + record.pid + " failed identity recheck; no " + signal + " sent");
@@ -287,7 +291,7 @@ async function terminateOwnedTree({
   let remainingDescendants = [];
   try {
     const remaining = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
-    verifiedExit = verifiedExit && !remaining.directChildVerified;
+    verifiedExit = verifiedExit && !remaining.directChildVerified && remaining.descendants.length === 0;
     remainingDescendants = remaining.descendants;
     if (remainingDescendants.length > 0) {
       errors.push("owned descendant processes remain after bounded cleanup");
@@ -297,6 +301,7 @@ async function terminateOwnedTree({
     errors.push(sanitizeDiagnosticsText(errorMessage(error)));
   }
 
+  verifiedExit = verifiedExit && errors.length === 0;
   return { errors, verifiedExit, remainingDescendants };
 }
 
@@ -388,6 +393,7 @@ export async function runVersionProbe({
     result.process.directChildPgid = ownership.childRecord?.pgid;
     if (!ownership.directChildVerified && !childExited(child)) {
       result.outcome = "INCONCLUSIVE";
+      result.disposition = "INCONCLUSIVE";
       result.startupPhase = "ownership-verification";
       result.errors.push("direct child PID/PPID/command verification failed");
       const cleanup = await terminateOwnedTree({
@@ -470,12 +476,31 @@ export async function runVersionProbe({
     }
   } catch (error) {
     result.outcome = "INCONCLUSIVE";
+    result.disposition = "INCONCLUSIVE";
     result.startupPhase = "diagnostic-failure";
     result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
   }
 
   result.stdout = stdout.join("");
   result.stderr = stderr.join("");
+  return result;
+}
+
+export async function persistProbeResult(result, { writeFileFn = writeFile } = {}) {
+  if (!result.runRoot) return result;
+  const diagnosticsPath = path.join(result.runRoot, "electron-version-probe.json");
+  result.diagnosticsPath = diagnosticsPath;
+  try {
+    await writeFileFn(diagnosticsPath, diagnosticsText(result), "utf8");
+  } catch (error) {
+    if (result.outcome === "PASS") result.outcome = "INCONCLUSIVE";
+    result.disposition = "CLEANUP_FAILURE";
+    result.errors = [
+      ...(result.errors ?? []),
+      sanitizeDiagnosticsText(errorMessage(error)),
+      "version-probe diagnostics could not be persisted; evidence root retained",
+    ];
+  }
   return result;
 }
 
@@ -519,11 +544,7 @@ async function main() {
     };
   }
 
-  if (runRoot) {
-    const diagnosticsPath = path.join(runRoot, "electron-version-probe.json");
-    result.diagnosticsPath = diagnosticsPath;
-    await writeFile(diagnosticsPath, diagnosticsText(result), "utf8");
-  }
+  result = await persistProbeResult(result);
   process.stdout.write(`${diagnosticsText(result)}\n`);
   process.exitCode = result.outcome === "PASS" ? 0 : 1;
 }

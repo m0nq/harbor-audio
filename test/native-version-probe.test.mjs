@@ -9,6 +9,7 @@ import {
   descendantsOf,
   isExactDirectChild,
   parseProcessTable,
+  persistProbeResult,
   runVersionProbe,
   validatePrivateRunRoot,
 } from "../e2e/native-version-probe.mjs";
@@ -35,17 +36,23 @@ function fakeChild(pid = 4242) {
   return child;
 }
 
-function fakeExecFile({ supervisorPid, childPid, executable, childAlive = true } = {}) {
+function fakeExecFile({
+  supervisorPid,
+  childPid,
+  executable,
+  childAlive = true,
+  startTime = "Mon Nov  4 12:00:00 2026",
+} = {}) {
   return async (command, args) => {
     const isChildAlive = typeof childAlive === "function" ? childAlive() : childAlive;
     assert.equal(command, "/bin/ps");
     if (args[0] === "-p") {
       const pid = Number(args[1]);
       if (pid === supervisorPid) {
-        return { stdout: `${supervisorPid} 100 ${supervisorPid} /opt/homebrew/bin/node supervisor.mjs\n` };
+        return { stdout: `${supervisorPid} 100 ${supervisorPid} ${startTime} /opt/homebrew/bin/node supervisor.mjs\n` };
       }
       if (pid === childPid && isChildAlive) {
-        return { stdout: `${childPid} ${supervisorPid} ${childPid} ${executable} --version\n` };
+        return { stdout: `${childPid} ${supervisorPid} ${childPid} ${startTime} ${executable} --version\n` };
       }
       const error = new Error("process not found");
       error.code = 1;
@@ -54,8 +61,8 @@ function fakeExecFile({ supervisorPid, childPid, executable, childAlive = true }
     if (args[0] === "-axo") {
       return {
         stdout: isChildAlive
-          ? `${supervisorPid} 100 ${supervisorPid} /opt/homebrew/bin/node supervisor.mjs\n${childPid} ${supervisorPid} ${childPid} ${executable} --version\n`
-          : `${supervisorPid} 100 ${supervisorPid} /opt/homebrew/bin/node supervisor.mjs\n`,
+          ? `${supervisorPid} 100 ${supervisorPid} ${startTime} /opt/homebrew/bin/node supervisor.mjs\n${childPid} ${supervisorPid} ${childPid} ${startTime} ${executable} --version\n`
+          : `${supervisorPid} 100 ${supervisorPid} ${startTime} /opt/homebrew/bin/node supervisor.mjs\n`,
       };
     }
     throw new Error("unexpected ps invocation");
@@ -75,7 +82,7 @@ test("removes only Electron override variables from the inherited environment", 
 
 test("parses process ownership records and descendants without using a process group", () => {
   const records = parseProcessTable(
-    "100 1 100 /bin/zsh\n200 100 100 /opt/Electron --version\n300 200 100 /opt/Electron Helper\n",
+    "100 1 100 Mon Nov  4 12:00:00 2026 /bin/zsh\n200 100 100 Mon Nov  4 12:00:01 2026 /opt/Electron --version\n300 200 100 Mon Nov  4 12:00:02 2026 /opt/Electron Helper\n",
   );
   assert.equal(isExactDirectChild(records[1], {
     childPid: 200,
@@ -84,6 +91,7 @@ test("parses process ownership records and descendants without using a process g
   }), true);
   assert.deepEqual(descendantsOf(200, records).map((record) => record.pid), [300]);
   assert.equal(records[1].pgid, 100);
+  assert.equal(records[1].startTime, "Mon Nov  4 12:00:01 2026");
 });
 
 test("validates a private mode-700 run root", async () => {
@@ -202,4 +210,73 @@ test("classifies a direct-child spawn error as FAILURE rather than TIMEOUT", asy
   assert.equal(result.outcome, "FAILURE");
   assert.equal(result.disposition, "FAILURE");
   assert.match(result.errors.join("\n"), /spawn denied/);
+});
+
+test("classifies diagnostics-write failure and never leaves a stale PASS", async () => {
+  const result = await persistProbeResult({
+    runRoot: "/private/run-root",
+    outcome: "PASS",
+    disposition: "PASS",
+    errors: [],
+  }, {
+    writeFileFn: async () => {
+      throw new Error("diagnostic disk failure");
+    },
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.match(result.errors.join("\n"), /diagnostic disk failure/);
+});
+
+test("downgrades a run when a verified descendant remains after child exit", async () => {
+  const child = fakeChild();
+  const executable = "/opt/Electron";
+  const startTime = "Mon Nov  4 12:00:00 2026";
+  const descendantPid = 4343;
+  const processLine = (pid, ppid, command) => (
+    String(pid) + " " + String(ppid) + " " + String(pid) + " " + startTime + " " + command + "\n"
+  );
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p") {
+      const pid = Number(args[1]);
+      if (pid === 100) return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+      if (pid === child.pid) return { stdout: processLine(child.pid, 100, executable + " --version") };
+      if (pid === descendantPid) return { stdout: processLine(descendantPid, child.pid, executable + " Helper") };
+      const error = new Error("process not found");
+      error.code = 1;
+      throw error;
+    }
+    if (args[0] === "-axo") {
+      return {
+        stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+          + processLine(child.pid, 100, executable + " --version")
+          + processLine(descendantPid, child.pid, executable + " Helper"),
+      };
+    }
+    throw new Error("unexpected ps invocation");
+  };
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        child.exitCode = 0;
+        child.stdout.emit("data", "44.7.0\n");
+        child.emit("exit", 0, null);
+      });
+      return child;
+    },
+    execFileFn,
+    killFn: () => {},
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(result.process.descendants.map((record) => record.pid), [descendantPid]);
 });
