@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 
 export const DEFAULT_PROCESS_EXIT_TIMEOUT_MS = 15_000;
 export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
+export const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
 const SENSITIVE_NAME_PATTERN = "(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*";
@@ -76,6 +77,7 @@ async function runCommand(command, args, cwd, execFileFn) {
     const result = await execFileFn(command, args, {
       cwd,
       maxBuffer: 1024 * 1024,
+      timeout: DEFAULT_COMMAND_TIMEOUT_MS,
     });
     return { value: result.stdout.trim() };
   } catch (error) {
@@ -101,6 +103,40 @@ function isSha(value, length) {
 
 function isVersion(value) {
   return typeof value === "string" && /^\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(value);
+}
+
+export function validateExpectedProvenance(provenance, expectations = {}) {
+  const mismatches = [];
+  const compare = (label, actual, expected) => {
+    if (expected !== undefined && actual !== expected) {
+      mismatches.push(`${label} expected ${expected} but was ${actual ?? "missing"}`);
+    }
+  };
+
+  compare("worktree", provenance?.worktree, expectations.worktree);
+  compare("base ref", provenance?.baseRef, expectations.baseRef);
+  compare("base SHA", provenance?.baseSha, expectations.baseSha);
+  compare("head SHA", provenance?.headSha, expectations.headSha);
+  compare("executable", provenance?.artifact?.executable, expectations.executable);
+  compare("Electron version", provenance?.toolchain?.electron, expectations.electronVersion);
+  compare("Electron architecture", provenance?.artifact?.architecture, expectations.electronArchitecture);
+  compare("Electron UUID", provenance?.artifact?.uuid, expectations.electronUuid);
+  compare("Electron executable SHA-256", provenance?.artifact?.sha256, expectations.electronSha256);
+  compare("Electron package SHA-256", provenance?.artifact?.packageJsonSha256, expectations.electronPackageJsonSha256);
+  compare("Playwright package SHA-256", provenance?.artifact?.playwrightPackageJsonSha256, expectations.playwrightPackageJsonSha256);
+  compare("repository package SHA-256", provenance?.artifact?.repositoryPackageJsonSha256, expectations.packageJsonSha256);
+  compare("lockfile SHA-256", provenance?.artifact?.lockfileSha256, expectations.lockfileSha256);
+  compare("invocation cwd", provenance?.invocation?.cwd, expectations.invocationCwd);
+  compare("branch/status", provenance?.repositoryStatus?.split("\n", 1)[0], expectations.branchStatus);
+
+  if (expectations.requireCleanWorkingTree) {
+    const statusLines = String(provenance?.repositoryStatus ?? "").split("\n").filter(Boolean);
+    if (statusLines.length !== 1 || !statusLines[0].startsWith("## ")) {
+      mismatches.push("working tree is not clean");
+    }
+  }
+
+  return mismatches;
 }
 
 export async function collectRunProvenance({
@@ -193,6 +229,9 @@ export async function collectRunProvenance({
     ["Playwright version", () => isVersion(playwrightVersion)],
     ["changed-files output", () => changedFilesOutputPresent],
     ["changed-files list", () => Array.isArray(changedFiles)],
+    ["invocation command", () => Array.isArray(command) && command.length > 0],
+    ["invocation cwd", () => isNonEmptyString(process.cwd())],
+    ["Node executable", () => isNonEmptyString(process.execPath)],
   ];
   const validationErrors = required
     .filter(([, check]) => !check())

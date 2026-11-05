@@ -10,6 +10,7 @@ import {
   isExactDirectChild,
   parseProcessTable,
   persistProbeResult,
+  PROCESS_INSPECTION_TIMEOUT_MS,
   runVersionProbe,
   validatePrivateRunRoot,
 } from "../e2e/native-version-probe.mjs";
@@ -31,6 +32,7 @@ function fakeChild(pid = 4242) {
     child.signalCode = signal;
     child.exitCode = null;
     child.emit("exit", null, signal);
+    child.emit("close", null, signal);
     return true;
   };
   return child;
@@ -47,6 +49,7 @@ function fakeExecFile({
     const isChildAlive = typeof childAlive === "function" ? childAlive() : childAlive;
     assert.equal(command, "/bin/ps");
     assert.equal(options.env.LC_ALL, "C");
+    assert.equal(options.timeout, PROCESS_INSPECTION_TIMEOUT_MS);
     if (args[0] === "-p") {
       const pid = Number(args[1]);
       if (pid === supervisorPid) {
@@ -124,6 +127,7 @@ test("returns PASS for an exact version with verified direct-child cleanup", asy
         child.signalCode = null;
         child.stdout.emit("data", "v44.7.0\n");
         child.emit("exit", 0, null);
+        child.emit("close", 0, null);
       });
       return child;
     },
@@ -151,6 +155,7 @@ test("times out and signals only the verified child PID, never its process group
     childAlive = false;
     child.signalCode = signal;
     child.emit("exit", null, signal);
+    child.emit("close", null, signal);
     return true;
   };
   const result = await runVersionProbe({
@@ -269,6 +274,7 @@ test("downgrades a run when a verified descendant remains after child exit", asy
         child.exitCode = 0;
         child.stdout.emit("data", "44.7.0\n");
         child.emit("exit", 0, null);
+        child.emit("close", 0, null);
       });
       return child;
     },
@@ -280,4 +286,206 @@ test("downgrades a run when a verified descendant remains after child exit", asy
   assert.equal(result.outcome, "INCONCLUSIVE");
   assert.equal(result.disposition, "CLEANUP_FAILURE");
   assert.deepEqual(result.process.descendants.map((record) => record.pid), [descendantPid]);
+});
+
+test("classifies a synchronous spawn exception without leaking an unhandled failure", async () => {
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: "/opt/Electron",
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      const error = new Error("spawn denied synchronously");
+      error.code = "EACCES";
+      throw error;
+    },
+    execFileFn: fakeExecFile({ supervisorPid: 100, childPid: 4242, executable: "/opt/Electron" }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "FAILURE");
+  assert.equal(result.disposition, "FAILURE");
+  assert.equal(result.startupPhase, "electron-launch");
+  assert.match(result.errors.join("\n"), /spawn denied synchronously/);
+});
+
+test("treats a missing child PID as inconclusive and does not claim cleanup verification", async () => {
+  const child = fakeChild(0);
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: "/opt/Electron",
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    graceMs: 1,
+    spawnFn: () => child,
+    execFileFn: fakeExecFile({ supervisorPid: 100, childPid: 0, executable: "/opt/Electron" }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.equal(child.signalCode, "SIGTERM");
+  assert.match(result.errors.join("\n"), /descendant cleanup could not be verified/);
+});
+
+test("waits for close after exit so delayed output is retained before success", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    timeoutMs: 50,
+    graceMs: 1,
+    spawnFn: () => {
+      setImmediate(() => {
+        childAlive = false;
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.emit("exit", 0, null);
+        setTimeout(() => {
+          child.stdout.emit("data", "v44.7.0\n");
+          child.emit("close", 0, null);
+        }, 5);
+      });
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "PASS");
+  assert.equal(result.processExit.closeObserved, true);
+  assert.equal(result.stdout, "v44.7.0\n");
+});
+
+test("treats a stdout capture error as a primary failure and still verifies cleanup", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        childAlive = false;
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("error", new Error("stdout capture failed"));
+        child.stdout.emit("data", "v44.7.0\n");
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "FAILURE");
+  assert.equal(result.disposition, "FAILURE");
+  assert.equal(result.process.termination.length, 0);
+  assert.match(result.errors.join("\n"), /stdout capture failed/);
+});
+
+test("classifies nonzero, signal, and malformed version results as failures", async (t) => {
+  const cases = [
+    { name: "nonzero", code: 2, signal: null, stdout: "v44.7.0\n" },
+    { name: "signal", code: null, signal: "SIGABRT", stdout: "" },
+    { name: "malformed", code: 0, signal: null, stdout: "not-electron\n" },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      const child = fakeChild();
+      let childAlive = true;
+      const executable = "/opt/Electron";
+      const result = await runVersionProbe({
+        repoRoot: "/repo",
+        electronExecutable: executable,
+        provenance: { status: true, toolchain: { electron: "44.7.0" } },
+        runRoot: "/private/run-root",
+        supervisorPid: 100,
+        execFileFn: fakeExecFile({
+          supervisorPid: 100,
+          childPid: child.pid,
+          executable,
+          childAlive: () => childAlive,
+        }),
+        spawnFn: () => {
+          setImmediate(() => {
+            childAlive = false;
+            child.exitCode = scenario.code;
+            child.signalCode = scenario.signal;
+            if (scenario.stdout) child.stdout.emit("data", scenario.stdout);
+            child.emit("exit", scenario.code, scenario.signal);
+            child.emit("close", scenario.code, scenario.signal);
+          });
+          return child;
+        },
+        validateRunRootFn: async () => "/private/run-root",
+      });
+
+      assert.equal(result.outcome, "FAILURE");
+      assert.equal(result.disposition, "FAILURE");
+      assert.match(result.errors.join("\n"), /version probe did not return 44\.7\.0/);
+    });
+  }
+});
+
+test("preserves an inspection failure and still attempts only the direct child handle", async () => {
+  const child = fakeChild();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    child.signalCode = signal;
+    child.emit("exit", null, signal);
+    child.emit("close", null, signal);
+    return true;
+  };
+  let processTableCalls = 0;
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: "/opt/Electron",
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    graceMs: 1,
+    spawnFn: () => child,
+    execFileFn: async (command, args, options) => {
+      assert.equal(command, "/bin/ps");
+      assert.equal(options.timeout, PROCESS_INSPECTION_TIMEOUT_MS);
+      if (args[0] === "-p" && Number(args[1]) === 100) {
+        return { stdout: "100 1 100 Mon Nov  4 12:00:00 2026 /opt/homebrew/bin/node supervisor.mjs\n" };
+      }
+      processTableCalls += 1;
+      throw new Error("ps inspection unavailable");
+    },
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.ok(processTableCalls >= 1);
+  assert.match(result.errors.join("\n"), /ps inspection unavailable/);
+  assert.doesNotMatch(result.errors.join("\n"), /process-group signal/);
 });

@@ -8,11 +8,13 @@ import {
   collectRunProvenance,
   diagnosticsText,
   sanitizeDiagnosticsText,
+  validateExpectedProvenance,
 } from "./launch-diagnostics.mjs";
 
 export const EXPECTED_ELECTRON_VERSION = "44.7.0";
 export const VERSION_PROBE_TIMEOUT_MS = 15_000;
 export const VERSION_PROBE_TERMINATION_GRACE_MS = 2_000;
+export const PROCESS_INSPECTION_TIMEOUT_MS = 5_000;
 export const ELECTRON_OVERRIDE_NAMES = [
   "ELECTRON_CACHE",
   "ELECTRON_MIRROR",
@@ -117,6 +119,7 @@ async function processRecord(pid, execFileFn) {
     const result = await execFileFn("/bin/ps", ["-p", String(pid), "-o", "pid=,ppid=,pgid=,lstart=,command="], {
       env: processDiagnosticEnvironment(),
       maxBuffer: 1024 * 1024,
+      timeout: PROCESS_INSPECTION_TIMEOUT_MS,
     });
     return parseProcessTable(result.stdout)[0];
   } catch (error) {
@@ -129,6 +132,7 @@ async function processTable(execFileFn) {
   const result = await execFileFn("/bin/ps", ["-axo", "pid=,ppid=,pgid=,lstart=,command="], {
     env: processDiagnosticEnvironment(),
     maxBuffer: 4 * 1024 * 1024,
+    timeout: PROCESS_INSPECTION_TIMEOUT_MS,
   });
   return parseProcessTable(result.stdout);
 }
@@ -145,33 +149,118 @@ function childExited(child) {
   return Boolean(child && (child.exitCode !== null || child.signalCode !== null));
 }
 
-function waitForChild(child, timeoutMs, setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout) {
-  if (childExited(child)) return Promise.resolve({ code: child.exitCode, signal: child.signalCode });
+function observeChildLifecycle(child) {
+  const state = {
+    exitObserved: childExited(child),
+    exitObservation: childExited(child)
+      ? { code: child.exitCode, signal: child.signalCode }
+      : undefined,
+    closeObserved: false,
+    error: undefined,
+  };
+  child.on?.("exit", (code, signal) => {
+    state.exitObserved = true;
+    state.exitObservation = { code, signal };
+  });
+  child.on?.("close", (code, signal) => {
+    state.closeObserved = true;
+    if (!state.exitObserved && (code !== undefined || signal !== undefined)) {
+      state.exitObservation = { code, signal };
+    }
+  });
+  child.on?.("error", (error) => {
+    state.error ??= error;
+  });
+  return state;
+}
+
+function waitForChild(
+  child,
+  timeoutMs,
+  setTimeoutFn = setTimeout,
+  clearTimeoutFn = clearTimeout,
+  lifecycle,
+) {
   return new Promise((resolve, reject) => {
-    const onExit = (code, signal) => {
+    let settled = false;
+    let exitObservation = lifecycle?.exitObservation ?? (childExited(child)
+      ? { code: child.exitCode, signal: child.signalCode }
+      : undefined);
+    const cleanupListeners = () => {
       clearTimeoutFn(timer);
+      child.removeListener?.("exit", onExit);
+      child.removeListener?.("close", onClose);
       child.removeListener?.("error", onError);
-      resolve({ code, signal });
+    };
+    const onExit = (code, signal) => {
+      exitObservation = { code, signal };
+    };
+    const onClose = (code, signal) => {
+      if (exitObservation === undefined) {
+        if (code !== undefined || signal !== undefined) {
+          exitObservation = { code, signal };
+        } else {
+          if (!settled) {
+            settled = true;
+            cleanupListeners();
+            reject(new Error("Electron version probe closed before exit was observed"));
+          }
+          return;
+        }
+      }
+      if (!settled) {
+        settled = true;
+        cleanupListeners();
+        resolve({ ...exitObservation, closeObserved: true, exitObserved: true });
+      } else {
+        cleanupListeners();
+      }
     };
     const onError = (error) => {
-      clearTimeoutFn(timer);
-      child.removeListener?.("exit", onExit);
-      reject(error);
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
     };
+    if (lifecycle?.error) {
+      settled = true;
+      reject(lifecycle.error);
+      return;
+    }
+    if (lifecycle?.closeObserved) {
+      settled = true;
+      if (lifecycle.exitObserved || exitObservation !== undefined) {
+        resolve({ ...exitObservation, closeObserved: true, exitObserved: true });
+      } else {
+        reject(new Error("Electron version probe closed before exit was observed"));
+      }
+      return;
+    }
     const timer = setTimeoutFn(() => {
-      child.removeListener?.("exit", onExit);
-      child.removeListener?.("error", onError);
-      reject(new Error(`Electron version probe exceeded ${timeoutMs}ms`));
+      if (!settled) {
+        settled = true;
+        const error = new Error(`Electron version probe exceeded ${timeoutMs}ms`);
+        error.code = "ERR_VERSION_PROBE_TIMEOUT";
+        reject(error);
+      }
     }, timeoutMs);
-    child.once("exit", onExit);
-    child.once("error", onError);
+    child.on("exit", onExit);
+    child.on("close", onClose);
+    child.on("error", onError);
   });
 }
 
 function captureOutput(stream, chunks) {
-  if (!stream) return;
-  stream.setEncoding?.("utf8");
-  stream.on("data", (chunk) => chunks.push(sanitizeDiagnosticsText(String(chunk))));
+  const state = { errors: [] };
+  if (!stream) return state;
+  try {
+    stream.setEncoding?.("utf8");
+    stream.on("data", (chunk) => chunks.push(sanitizeDiagnosticsText(String(chunk))));
+    stream.on("error", (error) => state.errors.push(sanitizeDiagnosticsText(errorMessage(error))));
+  } catch (error) {
+    state.errors.push(`output capture setup failed: ${sanitizeDiagnosticsText(errorMessage(error))}`);
+  }
+  return state;
 }
 
 async function ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn }) {
@@ -202,6 +291,18 @@ function sortForTermination(records) {
     return count;
   };
   return [...records].sort((left, right) => depth(right) - depth(left));
+}
+
+function killDirectChildHandle(child, signal, errors) {
+  if (childExited(child)) return;
+  try {
+    const accepted = child.kill?.(signal);
+    if (accepted === false || typeof child.kill !== "function") {
+      errors.push(`direct child handle did not accept ${signal}`);
+    }
+  } catch (error) {
+    errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+  }
 }
 
 async function signalVerifiedDescendants({ records, signal, killFn, execFileFn }) {
@@ -237,6 +338,7 @@ async function terminateOwnedTree({
   graceMs,
   setTimeoutFn,
   clearTimeoutFn,
+  lifecycle,
 }) {
   const errors = [];
   let ownership;
@@ -255,14 +357,21 @@ async function terminateOwnedTree({
     }
   } catch (error) {
     errors.push(sanitizeDiagnosticsText(errorMessage(error)));
-    if (!childExited(child)) errors.push("process table unavailable; no fallback process-group signal sent");
+    if (!childExited(child)) {
+      errors.push("process table unavailable; no descendant PID signal sent");
+      killDirectChildHandle(child, "SIGTERM", errors);
+    }
   }
 
   if (!childExited(child)) {
     try {
-      await waitForChild(child, graceMs, setTimeoutFn, clearTimeoutFn);
+      await waitForChild(child, graceMs, setTimeoutFn, clearTimeoutFn, lifecycle);
     } catch (error) {
       errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+      if (!childExited(child)) {
+        errors.push("process table unavailable for escalation; no descendant PID signal sent");
+        killDirectChildHandle(child, "SIGKILL", errors);
+      }
     }
   }
 
@@ -287,7 +396,7 @@ async function terminateOwnedTree({
 
   if (!childExited(child)) {
     try {
-      await waitForChild(child, graceMs, setTimeoutFn, clearTimeoutFn);
+      await waitForChild(child, graceMs, setTimeoutFn, clearTimeoutFn, lifecycle);
     } catch (error) {
       errors.push(sanitizeDiagnosticsText(errorMessage(error)));
     }
@@ -297,7 +406,10 @@ async function terminateOwnedTree({
   let remainingDescendants = [];
   try {
     const remaining = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
-    verifiedExit = verifiedExit && !remaining.directChildVerified && remaining.descendants.length === 0;
+    verifiedExit = verifiedExit
+      && !remaining.directChildVerified
+      && !remaining.childRecord
+      && remaining.descendants.length === 0;
     remainingDescendants = remaining.descendants;
     if (remainingDescendants.length > 0) {
       errors.push("owned descendant processes remain after bounded cleanup");
@@ -317,6 +429,7 @@ export async function runVersionProbe({
   provenance,
   runRoot,
   expectedVersion = EXPECTED_ELECTRON_VERSION,
+  expectedProvenance,
   timeoutMs = VERSION_PROBE_TIMEOUT_MS,
   graceMs = VERSION_PROBE_TERMINATION_GRACE_MS,
   spawnFn = defaultSpawn,
@@ -361,22 +474,53 @@ export async function runVersionProbe({
     if (provenance.toolchain?.electron !== expectedVersion) {
       throw new Error(`Electron package version is not ${expectedVersion}`);
     }
+    const provenanceMismatches = validateExpectedProvenance(provenance, expectedProvenance);
+    if (provenanceMismatches.length > 0) {
+      throw new Error(`exact native provenance mismatch: ${provenanceMismatches.join("; ")}`);
+    }
     await validateRunRootFn(runRoot);
   } catch (error) {
     result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
     return result;
   }
 
-  const child = spawnFn(electronExecutable, ["--version"], {
-    cwd: repoRoot,
-    env: buildProbeEnvironment(),
-    shell: false,
-    detached: false,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+  let child;
+  try {
+    child = spawnFn(electronExecutable, ["--version"], {
+      cwd: repoRoot,
+      env: buildProbeEnvironment(),
+      shell: false,
+      detached: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    result.startupPhase = "electron-launch";
+    result.outcome = "FAILURE";
+    result.disposition = "FAILURE";
+    result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+    return result;
+  }
+  const lifecycle = observeChildLifecycle(child);
+  const stdout = [];
+  const stderr = [];
+  const stdoutState = captureOutput(child.stdout, stdout);
+  const stderrState = captureOutput(child.stderr, stderr);
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
     result.startupPhase = "electron-launch";
+    result.outcome = "INCONCLUSIVE";
+    result.disposition = "INCONCLUSIVE";
     result.errors.push("direct child PID was not provided");
+    try {
+      child.kill?.("SIGTERM");
+      await waitForChild(child, graceMs, setTimeoutFn, clearTimeoutFn, lifecycle);
+    } catch (error) {
+      result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+    }
+    result.outcome = "INCONCLUSIVE";
+    result.disposition = "CLEANUP_FAILURE";
+    result.stdout = stdout.join("");
+    result.stderr = stderr.join("");
+    result.errors.push("direct child PID was unavailable; descendant cleanup could not be verified");
     return result;
   }
 
@@ -384,10 +528,39 @@ export async function runVersionProbe({
   result.process.directChildPid = child.pid;
   result.process.ownership = "direct-child-handle";
   result.process.ownershipSource = "node-child-process-handle plus ps PID/PPID/command verification";
-  const stdout = [];
-  const stderr = [];
-  captureOutput(child.stdout, stdout);
-  captureOutput(child.stderr, stderr);
+
+  const cleanupChild = async () => {
+    let cleanup;
+    try {
+      cleanup = await terminateOwnedTree({
+        child,
+        childPid: child.pid,
+        supervisorPid,
+        executable: electronExecutable,
+        execFileFn,
+        killFn,
+        graceMs,
+        setTimeoutFn,
+        clearTimeoutFn,
+        lifecycle,
+      });
+    } catch (error) {
+      cleanup = {
+        errors: [sanitizeDiagnosticsText(errorMessage(error))],
+        verifiedExit: false,
+        remainingDescendants: [],
+      };
+    }
+    result.process.termination = cleanup.errors;
+    result.process.descendants = cleanup.remainingDescendants;
+    result.errors.push(...cleanup.errors);
+    if (!cleanup.verifiedExit) {
+      result.outcome = "INCONCLUSIVE";
+      result.disposition = "CLEANUP_FAILURE";
+      result.errors.push("direct child exit and descendant cleanup could not be verified");
+    }
+    return cleanup;
+  };
 
   try {
     const ownership = await ownedProcessRecords({
@@ -402,57 +575,21 @@ export async function runVersionProbe({
       result.disposition = "INCONCLUSIVE";
       result.startupPhase = "ownership-verification";
       result.errors.push("direct child PID/PPID/command verification failed");
-      const cleanup = await terminateOwnedTree({
-        child,
-        childPid: child.pid,
-        supervisorPid,
-        executable: electronExecutable,
-        execFileFn,
-        killFn,
-        graceMs,
-        setTimeoutFn,
-        clearTimeoutFn,
-      });
-      result.process.termination = cleanup.errors;
-      result.process.descendants = cleanup.remainingDescendants;
-      result.errors.push(...cleanup.errors);
-      if (!cleanup.verifiedExit) {
-        result.outcome = "INCONCLUSIVE";
-        result.disposition = "CLEANUP_FAILURE";
-        result.errors.push("direct child exit and descendant cleanup could not be verified");
-      }
+      await cleanupChild();
       return result;
     }
 
     result.startupPhase = "version-probe";
     let exit;
     try {
-      exit = await waitForChild(child, timeoutMs, setTimeoutFn, clearTimeoutFn);
+      exit = await waitForChild(child, timeoutMs, setTimeoutFn, clearTimeoutFn, lifecycle);
     } catch (error) {
-      const timedOut = error?.message?.startsWith("Electron version probe exceeded ");
+      const timedOut = error?.code === "ERR_VERSION_PROBE_TIMEOUT";
       result.outcome = timedOut ? "TIMEOUT" : "FAILURE";
       result.disposition = result.outcome;
       result.startupPhase = timedOut ? "timeout" : "electron-error";
       result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
-      const cleanup = await terminateOwnedTree({
-        child,
-        childPid: child.pid,
-        supervisorPid,
-        executable: electronExecutable,
-        execFileFn,
-        killFn,
-        graceMs,
-        setTimeoutFn,
-        clearTimeoutFn,
-      });
-      result.process.termination = cleanup.errors;
-      result.process.descendants = cleanup.remainingDescendants;
-      result.errors.push(...cleanup.errors);
-      if (!cleanup.verifiedExit) {
-        result.outcome = "INCONCLUSIVE";
-        result.disposition = "CLEANUP_FAILURE";
-        result.errors.push("direct child exit and descendant cleanup could not be verified");
-      }
+      await cleanupChild();
       return result;
     }
 
@@ -460,7 +597,9 @@ export async function runVersionProbe({
     result.stdout = stdout.join("");
     result.stderr = stderr.join("");
     const version = result.stdout.trim().replace(/^v/, "");
-    if (exit.code !== 0 || exit.signal !== null || version !== expectedVersion) {
+    const outputErrors = [...stdoutState.errors, ...stderrState.errors];
+    if (outputErrors.length > 0) result.errors.push(...outputErrors);
+    if (exit.code !== 0 || exit.signal !== null || version !== expectedVersion || outputErrors.length > 0) {
       result.outcome = "FAILURE";
       result.disposition = "FAILURE";
       result.startupPhase = "version-probe";
@@ -471,30 +610,13 @@ export async function runVersionProbe({
       result.disposition = "PASS";
     }
 
-    const cleanup = await terminateOwnedTree({
-      child,
-      childPid: child.pid,
-      supervisorPid,
-      executable: electronExecutable,
-      execFileFn,
-      killFn,
-      graceMs,
-      setTimeoutFn,
-      clearTimeoutFn,
-    });
-    result.process.termination = cleanup.errors;
-    result.process.descendants = cleanup.remainingDescendants;
-    if (!cleanup.verifiedExit) {
-      result.outcome = "INCONCLUSIVE";
-      result.disposition = "CLEANUP_FAILURE";
-      result.errors.push("direct child exit and descendant cleanup could not be verified");
-      result.errors.push(...cleanup.errors);
-    }
+    await cleanupChild();
   } catch (error) {
     result.outcome = "INCONCLUSIVE";
     result.disposition = "INCONCLUSIVE";
     result.startupPhase = "diagnostic-failure";
     result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+    await cleanupChild();
   }
 
   result.stdout = stdout.join("");
@@ -520,6 +642,12 @@ export async function persistProbeResult(result, { writeFileFn = writeFile } = {
   return result;
 }
 
+function requiredExpectedEnvironment(name) {
+  const value = process.env[name]?.trim();
+  if (!value) throw new Error(`${name} is required for exact native provenance`);
+  return value;
+}
+
 async function main() {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const electronPackageRoot = path.join(
@@ -534,9 +662,29 @@ async function main() {
   let result;
   try {
     runRoot = await createPrivateRunRoot();
+    const expectedBaseRef = process.env.HARBOR_NATIVE_EXPECTED_BASE_REF ?? "feature/harbor-clo-159";
+    const expectedProvenance = {
+      worktree: repoRoot,
+      baseRef: expectedBaseRef,
+      baseSha: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_BASE_SHA"),
+      headSha: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_HEAD_SHA"),
+      executable: electronExecutable,
+      electronVersion: EXPECTED_ELECTRON_VERSION,
+      electronArchitecture: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE"),
+      electronUuid: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_UUID"),
+      electronSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256"),
+      electronPackageJsonSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256"),
+      playwrightPackageJsonSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256"),
+      packageJsonSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256"),
+      lockfileSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256"),
+      invocationCwd: repoRoot,
+      branchStatus: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_BRANCH_STATUS"),
+      requireCleanWorkingTree: true,
+    };
     const provenance = await collectRunProvenance({
       repoRoot,
       electronExecutable,
+      baseRef: expectedBaseRef,
       electronPackageJson: path.join(electronPackageRoot, "package.json"),
       playwrightPackageJson: path.join(
         repoRoot,
@@ -549,6 +697,7 @@ async function main() {
       electronExecutable,
       provenance,
       runRoot,
+      expectedProvenance,
     });
   } catch (error) {
     result = {

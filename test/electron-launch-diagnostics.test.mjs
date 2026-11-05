@@ -7,10 +7,12 @@ import { test } from "node:test";
 import {
   buildFailureError,
   collectRunProvenance,
+  DEFAULT_COMMAND_TIMEOUT_MS,
   finalizeDiagnostics,
   launchProcessDiagnostics,
   persistDiagnostics,
   sanitizeDiagnosticsText,
+  validateExpectedProvenance,
 } from "../e2e/launch-diagnostics.mjs";
 
 function diagnosticsFixture() {
@@ -97,9 +99,12 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
     playwrightPackageJson,
     baseRef: "feature/harbor-clo-159",
     command: ["node", "--test", "e2e/converted-electron.test.mjs"],
-    execFileFn: async (command, args) => ({
+    execFileFn: async (command, args, options) => {
+      assert.equal(options.timeout, DEFAULT_COMMAND_TIMEOUT_MS);
+      return {
       stdout: outputs.get([command, ...args].join(" ")) ?? "",
-    }),
+      };
+    },
   });
 
   assert.equal(provenance.status, true);
@@ -112,6 +117,28 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   assert.equal(provenance.toolchain.playwright, "1.64.1");
   assert.match(provenance.artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(provenance.toolchain.pnpm, "12.12.1");
+  assert.deepEqual(validateExpectedProvenance(provenance, {
+    worktree: repoRoot,
+    baseRef: "feature/harbor-clo-159",
+    baseSha: provenance.baseSha,
+    headSha: provenance.headSha,
+    executable: electronExecutable,
+    electronVersion: "44.7.0",
+    electronArchitecture: "arm64",
+    electronUuid: "4C4C44AF-5555-3144-A1E7-7E571B4F50E9",
+    electronSha256: provenance.artifact.sha256,
+    electronPackageJsonSha256: provenance.artifact.packageJsonSha256,
+    playwrightPackageJsonSha256: provenance.artifact.playwrightPackageJsonSha256,
+    packageJsonSha256: provenance.artifact.repositoryPackageJsonSha256,
+    lockfileSha256: provenance.artifact.lockfileSha256,
+    invocationCwd: process.cwd(),
+    branchStatus: "## mw/harbor-clo-160",
+    requireCleanWorkingTree: true,
+  }), []);
+  assert.match(
+    validateExpectedProvenance(provenance, { headSha: "f".repeat(40) }).join("\n"),
+    /head SHA expected/,
+  );
 });
 
 test("fails closed when provenance command output is empty or malformed", async () => {
@@ -137,6 +164,34 @@ test("fails closed when provenance command output is empty or malformed", async 
   assert.equal(provenance.status, false);
   assert.ok(provenance.errors.some((error) => /head SHA/.test(error)));
   assert.ok(provenance.errors.some((error) => /changed-files output/.test(error)));
+});
+
+test("records a bounded provenance-command timeout as evidence failure", async () => {
+  const repoRoot = await mkdtemp(path.join(os.tmpdir(), "harbor-provenance-timeout-"));
+  const electronExecutable = path.join(repoRoot, "Electron");
+  const electronPackageJson = path.join(repoRoot, "electron-package.json");
+  const playwrightPackageJson = path.join(repoRoot, "playwright-package.json");
+  await writeFile(electronExecutable, "electron-bytes");
+  await writeFile(electronPackageJson, '{"version":"44.7.0"}');
+  await writeFile(playwrightPackageJson, '{"version":"1.64.1"}');
+  await writeFile(path.join(repoRoot, "package.json"), '{"name":"harbor-audio"}');
+  await writeFile(path.join(repoRoot, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+
+  const timeoutError = new Error("command timed out");
+  timeoutError.code = "ETIMEDOUT";
+  const provenance = await collectRunProvenance({
+    repoRoot,
+    electronExecutable,
+    electronPackageJson,
+    playwrightPackageJson,
+    execFileFn: async (_command, _args, options) => {
+      assert.equal(options.timeout, DEFAULT_COMMAND_TIMEOUT_MS);
+      throw timeoutError;
+    },
+  });
+
+  assert.equal(provenance.status, false);
+  assert.ok(provenance.errors.some((error) => /timed out/.test(error)));
 });
 
 test("accepts a valid empty changed-file list while rejecting malformed versions", async () => {

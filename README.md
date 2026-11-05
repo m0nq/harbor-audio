@@ -95,18 +95,32 @@ From an authorized physical macOS Aqua/Terminal session, run the bounded
 version probe before the full GUI suite:
 
 ```zsh
-/opt/homebrew/bin/node e2e/native-version-probe.mjs
+env \
+  HARBOR_NATIVE_EXPECTED_BASE_REF='feature/harbor-clo-159' \
+  HARBOR_NATIVE_EXPECTED_BASE_SHA='<approved-base-sha>' \
+  HARBOR_NATIVE_EXPECTED_HEAD_SHA='<approved-exact-head-sha>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE='<approved-artifact-architecture>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_UUID='<approved-artifact-uuid>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256='<approved-executable-sha256>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256='<approved-electron-package-sha256>' \
+  HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256='<approved-playwright-package-sha256>' \
+  HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256='<approved-package-json-sha256>' \
+  HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256='<approved-lockfile-sha256>' \
+  HARBOR_NATIVE_EXPECTED_BRANCH_STATUS='## <approved-branch-status>' \
+  /opt/homebrew/bin/node e2e/native-version-probe.mjs
 ```
 
 The probe verifies the exact worktree and Electron artifact, creates a private
 mode-700 evidence root, preserves the normal macOS environment while removing
 only Electron override variables, and launches only the direct child
 `Electron --version` process. It records individual PID/PPID/PGID observations
-but never signals a process group or matches process names. `PASS` requires
-exact version output and verified child/descendant cleanup. `FAILURE`,
-`TIMEOUT`, `INCONCLUSIVE`, or `HOLD` retains the evidence root and stops the
-native sequence; do not proceed to the full GUI suite until the probe is a
-verified `PASS`.
+but never signals a process group or matches process names. Every placeholder
+must be replaced with independently recorded values for the exact approved
+worktree/head; missing or mismatched values fail closed before launch. `PASS`
+requires exact version output, observed process `close`, and verified
+child/descendant cleanup. `FAILURE`, `TIMEOUT`, `INCONCLUSIVE`, or `HOLD`
+retains the evidence root and stops the native sequence; do not proceed to the
+full GUI suite until the probe is a verified `PASS`.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only
