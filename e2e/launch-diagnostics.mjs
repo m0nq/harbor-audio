@@ -175,6 +175,12 @@ export function createBoundedDiagnosticsCapture(
   return { values, append, get bytes() { return bytes; }, get truncated() { return truncated; } };
 }
 
+export function waitForPostCloseSettlement(setTimeoutFn = setTimeout) {
+  return new Promise((resolve) => {
+    setTimeoutFn(resolve, POST_CLOSE_SETTLEMENT_TIMEOUT_MS);
+  });
+}
+
 export function currentInvocationCommand({
   execPath = process.execPath,
   execArgv = process.execArgv,

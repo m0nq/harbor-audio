@@ -12,6 +12,7 @@ import {
   sanitizeDiagnosticsText,
   utf8Prefix,
   validateExpectedProvenance,
+  waitForPostCloseSettlement,
 } from "./launch-diagnostics.mjs";
 
 export const EXPECTED_ELECTRON_VERSION = "44.7.0";
@@ -19,7 +20,6 @@ export const VERSION_PROBE_TIMEOUT_MS = 15_000;
 export const VERSION_PROBE_TERMINATION_GRACE_MS = 2_000;
 export const PROCESS_INSPECTION_TIMEOUT_MS = 5_000;
 export const MAX_CAPTURED_OUTPUT_BYTES = MAX_CAPTURED_STREAM_BYTES;
-export const POST_CLOSE_SETTLEMENT_TIMEOUT_MS = 100;
 export const ELECTRON_OVERRIDE_NAMES = [
   "ELECTRON_CACHE",
   "ELECTRON_MIRROR",
@@ -727,14 +727,7 @@ export async function runVersionProbe({
     return lateFailure;
   };
   const settleCapturedOutput = async () => {
-    let settlementTimer;
-    await Promise.race([
-      new Promise((resolve) => setImmediate(resolve)),
-      new Promise((resolve) => {
-        settlementTimer = setTimeoutFn(resolve, POST_CLOSE_SETTLEMENT_TIMEOUT_MS);
-      }),
-    ]);
-    if (settlementTimer !== undefined) clearTimeoutFn(settlementTimer);
+    await waitForPostCloseSettlement(setTimeoutFn);
     finalizeOutput();
     finalizeLateFailures();
   };

@@ -13,11 +13,11 @@ import {
   finalizeDiagnostics,
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
-  POST_CLOSE_SETTLEMENT_TIMEOUT_MS,
   createBoundedDiagnosticsCapture,
   recordProcessError,
   utf8Prefix,
   validateExpectedProvenance,
+  waitForPostCloseSettlement,
 } from "./launch-diagnostics.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -268,9 +268,7 @@ async function withElectronLaunch(scenario, callback) {
         passed,
         profileRoot,
         timeout: timeoutMs,
-        settleAfterClose: () => new Promise((resolve) => {
-          setTimeout(resolve, POST_CLOSE_SETTLEMENT_TIMEOUT_MS);
-        }),
+        settleAfterClose: () => waitForPostCloseSettlement(),
       });
     } finally {
       for (const dispose of listenerDisposers.splice(0).reverse()) dispose();

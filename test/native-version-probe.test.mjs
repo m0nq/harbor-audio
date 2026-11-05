@@ -165,7 +165,7 @@ test("downgrades a version result when a lifecycle error arrives after close", a
         child.stdout.emit("data", "v44.7.0\n");
         child.emit("exit", 0, null);
         child.emit("close", 0, null);
-        queueMicrotask(() => child.emit("error", new Error("late child error")));
+        setTimeout(() => child.emit("error", new Error("late child error")), 30);
       });
       return child;
     },
