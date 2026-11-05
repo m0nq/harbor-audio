@@ -10,7 +10,7 @@ export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
-const SENSITIVE_NAME_PATTERN = "(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*";
+const SENSITIVE_NAME_PATTERN = "(?:(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*|[A-Za-z0-9]*?(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)[A-Za-z0-9]*)";
 const SENSITIVE_ASSIGNMENT_PREFIX = "(\\b" + SENSITIVE_NAME_PATTERN + "\\b\\s*[:=]\\s*)";
 const DOUBLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   SENSITIVE_ASSIGNMENT_PREFIX + '("[^"]*")',
@@ -25,7 +25,7 @@ const SINGLE_QUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   "gi",
 );
 const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
-  SENSITIVE_ASSIGNMENT_PREFIX + "(?![\"'])([^\\r\\n;]*)(?=;|$)",
+  SENSITIVE_ASSIGNMENT_PREFIX + "(?![\"'])([^\\r\\n;]*)(?=;|\\r?\\n|$)",
   "gi",
 );
 const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
@@ -157,6 +157,13 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
   compare("repository package SHA-256", provenance?.artifact?.repositoryPackageJsonSha256, expectations.packageJsonSha256);
   compare("lockfile SHA-256", provenance?.artifact?.lockfileSha256, expectations.lockfileSha256);
   compare("invocation cwd", provenance?.invocation?.cwd, expectations.invocationCwd);
+  if (expectations.invocationCommand !== undefined) {
+    if (!Array.isArray(expectations.invocationCommand)) {
+      mismatches.push("invocation command expectation is invalid");
+    } else if (JSON.stringify(provenance?.invocation?.command) !== JSON.stringify(expectations.invocationCommand)) {
+      mismatches.push(`invocation command expected ${JSON.stringify(expectations.invocationCommand)} but was ${JSON.stringify(provenance?.invocation?.command)}`);
+    }
+  }
   compare("branch/status", provenance?.repositoryStatus?.split("\n", 1)[0], expectations.branchStatus);
 
   if (expectations.requireCleanWorkingTree) {
@@ -171,6 +178,7 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
 
 export const EXACT_PROVENANCE_ENVIRONMENT_NAMES = [
   "HARBOR_NATIVE_EXPECTED_WORKTREE",
+  "HARBOR_NATIVE_EXPECTED_BASE_REF",
   "HARBOR_NATIVE_EXPECTED_BASE_SHA",
   "HARBOR_NATIVE_EXPECTED_HEAD_SHA",
   "HARBOR_NATIVE_EXPECTED_NODE_VERSION",
@@ -186,6 +194,7 @@ export const EXACT_PROVENANCE_ENVIRONMENT_NAMES = [
   "HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256",
   "HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256",
   "HARBOR_NATIVE_EXPECTED_BRANCH_STATUS",
+  "HARBOR_NATIVE_EXPECTED_INVOCATION",
 ];
 
 export function expectedProvenanceFromEnvironment({
@@ -197,9 +206,21 @@ export function expectedProvenanceFromEnvironment({
 } = {}) {
   const value = (name) => environment[name]?.trim();
   const expectedWorktree = value("HARBOR_NATIVE_EXPECTED_WORKTREE");
+  const expectedInvocationRaw = value("HARBOR_NATIVE_EXPECTED_INVOCATION");
+  let expectedInvocation;
+  let invocationExpectationValid = false;
+  if (expectedInvocationRaw) {
+    try {
+      const parsed = JSON.parse(expectedInvocationRaw);
+      invocationExpectationValid = Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string");
+      if (invocationExpectationValid) expectedInvocation = parsed;
+    } catch {
+      invocationExpectationValid = false;
+    }
+  }
   const expected = {
     worktree: expectedWorktree,
-    baseRef: environment.HARBOR_NATIVE_EXPECTED_BASE_REF?.trim() || baseRef,
+    baseRef: value("HARBOR_NATIVE_EXPECTED_BASE_REF"),
     baseSha: value("HARBOR_NATIVE_EXPECTED_BASE_SHA"),
     headSha: value("HARBOR_NATIVE_EXPECTED_HEAD_SHA"),
     nodeVersion: value("HARBOR_NATIVE_EXPECTED_NODE_VERSION"),
@@ -217,12 +238,15 @@ export function expectedProvenanceFromEnvironment({
     packageJsonSha256: value("HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256"),
     lockfileSha256: value("HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256"),
     invocationCwd: expectedWorktree,
+    invocationCommand: expectedInvocation,
     branchStatus: value("HARBOR_NATIVE_EXPECTED_BRANCH_STATUS"),
     requireCleanWorkingTree: true,
   };
+  const missing = EXACT_PROVENANCE_ENVIRONMENT_NAMES.filter((name) => !value(name));
+  if (expectedInvocationRaw && !invocationExpectationValid) missing.push("HARBOR_NATIVE_EXPECTED_INVOCATION");
   return {
     expected,
-    missing: EXACT_PROVENANCE_ENVIRONMENT_NAMES.filter((name) => !value(name)),
+    missing: [...new Set(missing)],
   };
 }
 

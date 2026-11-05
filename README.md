@@ -113,6 +113,7 @@ env \
   HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256='<approved-package-json-sha256>' \
   HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256='<approved-lockfile-sha256>' \
   HARBOR_NATIVE_EXPECTED_BRANCH_STATUS='## <approved-branch-status>' \
+  HARBOR_NATIVE_EXPECTED_INVOCATION='["/opt/homebrew/bin/node","e2e/native-version-probe.mjs"]' \
   /opt/homebrew/bin/node e2e/native-version-probe.mjs
 ```
 
@@ -127,6 +128,10 @@ requires exact version output, observed process `close`, and verified
 child/descendant cleanup. `FAILURE`, `TIMEOUT`, `INCONCLUSIVE`, or `HOLD`
 retains the evidence root and stops the native sequence; do not proceed to the
 full GUI suite until the probe is a verified `PASS`.
+
+The full GUI suite must use the same exact provenance values but set
+`HARBOR_NATIVE_EXPECTED_INVOCATION` to
+`["/opt/homebrew/bin/node","--test","e2e/converted-electron.test.mjs"]`.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only

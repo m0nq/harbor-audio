@@ -266,7 +266,7 @@ function captureOutput(stream, chunks) {
   if (!stream) return state;
   try {
     stream.setEncoding?.("utf8");
-    stream.on("data", (chunk) => chunks.push(sanitizeDiagnosticsText(String(chunk))));
+    stream.on("data", (chunk) => chunks.push(String(chunk)));
     stream.on("error", (error) => state.errors.push(sanitizeDiagnosticsText(errorMessage(error))));
   } catch (error) {
     state.errors.push(`output capture setup failed: ${sanitizeDiagnosticsText(errorMessage(error))}`);
@@ -409,7 +409,7 @@ async function terminateOwnedTree({
         execFileFn,
         allowReparented: true,
       }));
-      if (ownership.directChildVerified && !childExited(child)) {
+      if ((ownership.directChildVerified || initialDirectChildVerified) && !childExited(child)) {
         killDirectChildHandle(child, "SIGTERM", errors);
       }
     }
@@ -456,6 +456,9 @@ async function terminateOwnedTree({
           execFileFn,
           allowReparented: true,
         }));
+        if (initialDirectChildVerified && !childExited(child)) {
+          killDirectChildHandle(child, "SIGKILL", errors);
+        }
       } else if (!current.childRecord) {
         killDirectChildHandle(child, "SIGKILL", errors);
       } else {
@@ -600,6 +603,20 @@ export async function runVersionProbe({
   const stderr = [];
   const stdoutState = captureOutput(child.stdout, stdout);
   const stderrState = captureOutput(child.stderr, stderr);
+  const finalizeOutput = () => {
+    const rawStdout = stdout.join("");
+    const rawStderr = stderr.join("");
+    result.stdout = sanitizeDiagnosticsText(rawStdout);
+    result.stderr = sanitizeDiagnosticsText(rawStderr);
+    return { rawStdout, rawStderr };
+  };
+  const appendOutputErrors = () => {
+    const outputErrors = [...stdoutState.errors, ...stderrState.errors];
+    for (const outputError of outputErrors) {
+      if (!result.errors.includes(outputError)) result.errors.push(outputError);
+    }
+    return outputErrors;
+  };
   let initialDescendants = [];
   let initialDirectChildVerified = false;
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
@@ -615,8 +632,8 @@ export async function runVersionProbe({
     }
     result.outcome = "INCONCLUSIVE";
     result.disposition = "CLEANUP_FAILURE";
-    result.stdout = stdout.join("");
-    result.stderr = stderr.join("");
+    appendOutputErrors();
+    finalizeOutput();
     result.errors.push("direct child PID was unavailable; descendant cleanup could not be verified");
     lifecycle.dispose?.();
     return result;
@@ -628,6 +645,8 @@ export async function runVersionProbe({
   result.process.ownershipSource = "node-child-process-handle plus ps PID/PPID/command verification";
 
   const cleanupChild = async () => {
+    appendOutputErrors();
+    finalizeOutput();
     let cleanup;
     try {
       cleanup = await terminateOwnedTree({
@@ -653,6 +672,8 @@ export async function runVersionProbe({
     } finally {
       lifecycle.dispose?.();
     }
+    appendOutputErrors();
+    finalizeOutput();
     result.process.termination = cleanup.errors;
     result.process.descendants = cleanup.remainingDescendants;
     for (const error of cleanup.errors) {
@@ -700,11 +721,9 @@ export async function runVersionProbe({
     }
 
     result.processExit = exit;
-    result.stdout = stdout.join("");
-    result.stderr = stderr.join("");
-    const version = result.stdout.trim().replace(/^v/, "");
-    const outputErrors = [...stdoutState.errors, ...stderrState.errors];
-    if (outputErrors.length > 0) result.errors.push(...outputErrors);
+    const { rawStdout } = finalizeOutput();
+    const version = rawStdout.trim().replace(/^v/, "");
+    const outputErrors = appendOutputErrors();
     if (exit.code !== 0 || exit.signal !== null || version !== expectedVersion || outputErrors.length > 0) {
       result.outcome = "FAILURE";
       result.disposition = "FAILURE";
@@ -725,8 +744,7 @@ export async function runVersionProbe({
     await cleanupChild();
   }
 
-  result.stdout = stdout.join("");
-  result.stderr = stderr.join("");
+  finalizeOutput();
   return result;
 }
 

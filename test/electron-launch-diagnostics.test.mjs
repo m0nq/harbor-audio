@@ -34,7 +34,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   const diagnostics = {
     artifactsDir,
     launchError: {
-      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2; Authorization: Digest username=alice, realm=secret, nonce=raw; access_token=raw-access; refresh_token=raw-refresh; client_secret=raw-secret; oauth_access_token=raw-oauth; db_client_secret=raw-db; authorization_token=raw-auth; password: raw secret phrase; https://example.test/?token=url-token",
+      message: "Authorization: Bearer secret-token token=raw-token; Authorization: Basic raw-basic; Authorization: Token raw-token-2; Authorization: Digest username=alice, realm=secret, nonce=raw; access_token=raw-access; refresh_token=raw-refresh; client_secret=raw-secret; clientSecret=raw-camel-secret; authToken=raw-camel-token; authorizationToken=raw-camel-authorization; oauth_access_token=raw-oauth; db_client_secret=raw-db; authorization_token=raw-auth; password: raw secret phrase; https://example.test/?token=url-token",
       apiKey: "raw-api-key",
     },
   };
@@ -46,7 +46,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
   assert.match(contents, /token=\[REDACTED\]/);
   assert.match(contents, /"apiKey": "\[REDACTED\]"/);
   assert.match(contents, /Authorization: \[REDACTED\]/);
-  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|realm=secret|nonce=raw|raw-access|raw-refresh|raw-secret|raw-oauth|raw-db|raw-auth|secret phrase|url-token|raw-api-key/);
+  assert.doesNotMatch(contents, /secret-token|raw-token|raw-basic|raw-token-2|realm=secret|nonce=raw|raw-access|raw-refresh|raw-secret|raw-camel-secret|raw-camel-token|raw-camel-authorization|raw-oauth|raw-db|raw-auth|secret phrase|url-token|raw-api-key/);
 });
 
 test("redacts complete delimiter and authorization credential forms", () => {
@@ -106,6 +106,7 @@ test("requires an independently supplied canonical worktree expectation", () => 
     electronVersion: "44.7.0",
     environment: {
       HARBOR_NATIVE_EXPECTED_WORKTREE: "/approved/worktree",
+      HARBOR_NATIVE_EXPECTED_BASE_REF: "feature/harbor-clo-159",
       HARBOR_NATIVE_EXPECTED_BASE_SHA: "1".repeat(40),
       HARBOR_NATIVE_EXPECTED_HEAD_SHA: "2".repeat(40),
       HARBOR_NATIVE_EXPECTED_NODE_VERSION: "v26.13.0",
@@ -121,12 +122,40 @@ test("requires an independently supplied canonical worktree expectation", () => 
       HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256: "6".repeat(64),
       HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256: "7".repeat(64),
       HARBOR_NATIVE_EXPECTED_BRANCH_STATUS: "## approved",
+      HARBOR_NATIVE_EXPECTED_INVOCATION: "[\"/opt/homebrew/bin/node\",\"e2e/native-version-probe.mjs\"]",
     },
   });
 
   assert.equal(expected.worktree, "/approved/worktree");
   assert.equal(expected.invocationCwd, "/approved/worktree");
+  assert.equal(expected.baseRef, "feature/harbor-clo-159");
+  assert.deepEqual(expected.invocationCommand, ["/opt/homebrew/bin/node", "e2e/native-version-probe.mjs"]);
   assert.equal(missing.length, 0);
+});
+
+test("requires an independently supplied expected base ref", () => {
+  const { missing } = expectedProvenanceFromEnvironment({
+    environment: {},
+  });
+
+  assert.ok(missing.includes("HARBOR_NATIVE_EXPECTED_BASE_REF"));
+});
+
+test("rejects an invalid expected invocation", () => {
+  const { missing } = expectedProvenanceFromEnvironment({
+    environment: { HARBOR_NATIVE_EXPECTED_INVOCATION: "not-json" },
+  });
+
+  assert.ok(missing.includes("HARBOR_NATIVE_EXPECTED_INVOCATION"));
+});
+
+test("rejects an invocation command mismatch", () => {
+  assert.match(
+    validateExpectedProvenance({ invocation: { command: ["node", "actual.mjs"] } }, {
+      invocationCommand: ["node", "expected.mjs"],
+    }).join("\n"),
+    /invocation command expected/,
+  );
 });
 
 test("compares worktree and invocation paths by realpath", async () => {

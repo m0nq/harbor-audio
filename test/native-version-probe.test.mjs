@@ -183,7 +183,76 @@ test("times out and signals only the verified child PID, never its process group
   assert.equal(child.signalCode, "SIGTERM");
 });
 
-test("classifies a direct-child spawn error with uncertain cleanup as INCONCLUSIVE", async () => {
+test("uses the verified launch handle when ps temporarily omits the child during escalation", async () => {
+  const child = fakeChild();
+  const executable = "/opt/Electron";
+  const startTime = "Mon Nov  4 12:00:00 2026";
+  const descendantPid = 4343;
+  let tableCalls = 0;
+  let descendantAlive = true;
+  const childSignals = [];
+  const processLine = (pid, ppid, command) => (
+    `${pid} ${ppid} ${pid} ${startTime} ${command}\n`
+  );
+
+  child.kill = (signal) => {
+    childSignals.push(signal);
+    if (signal === "SIGKILL") {
+      child.signalCode = signal;
+      child.emit("exit", null, signal);
+      child.emit("close", null, signal);
+    }
+    return true;
+  };
+
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p") {
+      const pid = Number(args[1]);
+      if (pid === 100) return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+      if (pid === descendantPid && descendantAlive) {
+        return { stdout: processLine(descendantPid, child.pid, executable + " Helper") };
+      }
+      const error = new Error("process not found");
+      error.code = 1;
+      throw error;
+    }
+    if (args[0] === "-axo") {
+      tableCalls += 1;
+      if (tableCalls === 1) {
+        return {
+          stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+            + processLine(child.pid, 100, executable + " --version")
+            + processLine(descendantPid, child.pid, executable + " Helper"),
+        };
+      }
+      return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+    }
+    throw new Error("unexpected ps invocation");
+  };
+
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    timeoutMs: 1,
+    graceMs: 1,
+    spawnFn: () => child,
+    execFileFn,
+    killFn: (_pid, signal) => {
+      if (signal === "SIGTERM" || signal === "SIGKILL") descendantAlive = false;
+    },
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(childSignals, ["SIGTERM", "SIGKILL"]);
+});
+
+test("classifies an asynchronous child error as failure when cleanup is verified", async () => {
   const child = fakeChild();
   let childAlive = true;
   const executable = "/opt/Electron";
@@ -196,10 +265,11 @@ test("classifies a direct-child spawn error with uncertain cleanup as INCONCLUSI
     timeoutMs: 50,
     graceMs: 1,
     spawnFn: () => {
-      setImmediate(() => {
+      queueMicrotask(() => {
         childAlive = false;
         const error = new Error("spawn denied");
         error.code = "EACCES";
+        child.stderr.emit("error", new Error("stderr capture failed before child error"));
         child.emit("error", error);
       });
       return child;
@@ -213,12 +283,50 @@ test("classifies a direct-child spawn error with uncertain cleanup as INCONCLUSI
     validateRunRootFn: async () => "/private/run-root",
   });
 
-  assert.equal(result.outcome, "INCONCLUSIVE");
-  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.equal(result.outcome, "FAILURE");
+  assert.equal(result.disposition, "FAILURE");
   assert.match(result.errors.join("\n"), /spawn denied/);
+  assert.match(result.errors.join("\n"), /stderr capture failed before child error/);
   assert.equal(child.listenerCount("error"), 0);
   assert.equal(child.listenerCount("exit"), 0);
   assert.equal(child.listenerCount("close"), 0);
+});
+
+test("retains stream capture errors when a version probe times out", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  child.kill = (signal) => {
+    childAlive = false;
+    child.signalCode = signal;
+    child.emit("exit", null, signal);
+    child.emit("close", null, signal);
+    return true;
+  };
+
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    timeoutMs: 1,
+    graceMs: 1,
+    spawnFn: () => {
+      setImmediate(() => child.stderr.emit("error", new Error("stderr capture failed during timeout")));
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "TIMEOUT");
+  assert.match(result.errors.join("\n"), /stderr capture failed during timeout/);
 });
 
 test("classifies diagnostics-write failure and never leaves a stale PASS", async () => {
@@ -429,6 +537,45 @@ test("waits for close after exit so delayed output is retained before success", 
   assert.equal(result.outcome, "PASS");
   assert.equal(result.processExit.closeObserved, true);
   assert.equal(result.stdout, "v44.7.0\n");
+});
+
+test("joins and sanitizes complete stdout and stderr streams before retaining them", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        childAlive = false;
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("data", "Authorization ");
+        child.stdout.emit("data", "Foo+Bar split-secret\n");
+        child.stderr.emit("data", "clientSecret=");
+        child.stderr.emit("data", "stderr-secret\n");
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "FAILURE");
+  assert.match(result.stdout, /Authorization Foo\+Bar \[REDACTED\]/);
+  assert.match(result.stderr, /clientSecret=\[REDACTED\]/);
+  assert.doesNotMatch(result.stdout + result.stderr, /split-secret|stderr-secret/);
 });
 
 test("treats a stdout capture error as a primary failure and still verifies cleanup", async () => {
