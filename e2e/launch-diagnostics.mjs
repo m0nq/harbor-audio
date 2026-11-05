@@ -28,7 +28,7 @@ const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   "gi",
 );
 const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
-const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+[A-Za-z][A-Za-z0-9_-]*\s+)[^\r\n;]*/gi;
+const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+[^\s:;,]+\s+)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 const execFile = promisify(defaultExecFile);
 
@@ -142,6 +142,60 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
   }
 
   return mismatches;
+}
+
+export const EXACT_PROVENANCE_ENVIRONMENT_NAMES = [
+  "HARBOR_NATIVE_EXPECTED_BASE_SHA",
+  "HARBOR_NATIVE_EXPECTED_HEAD_SHA",
+  "HARBOR_NATIVE_EXPECTED_NODE_VERSION",
+  "HARBOR_NATIVE_EXPECTED_PNPM_VERSION",
+  "HARBOR_NATIVE_EXPECTED_MACOS_VERSION",
+  "HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE",
+  "HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION",
+  "HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE",
+  "HARBOR_NATIVE_EXPECTED_ELECTRON_UUID",
+  "HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256",
+  "HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256",
+  "HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256",
+  "HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256",
+  "HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256",
+  "HARBOR_NATIVE_EXPECTED_BRANCH_STATUS",
+];
+
+export function expectedProvenanceFromEnvironment({
+  worktree,
+  executable,
+  electronVersion,
+  baseRef = "feature/harbor-clo-159",
+} = {}) {
+  const value = (name) => process.env[name]?.trim();
+  const expected = {
+    worktree,
+    baseRef: process.env.HARBOR_NATIVE_EXPECTED_BASE_REF?.trim() || baseRef,
+    baseSha: value("HARBOR_NATIVE_EXPECTED_BASE_SHA"),
+    headSha: value("HARBOR_NATIVE_EXPECTED_HEAD_SHA"),
+    nodeVersion: value("HARBOR_NATIVE_EXPECTED_NODE_VERSION"),
+    pnpmVersion: value("HARBOR_NATIVE_EXPECTED_PNPM_VERSION"),
+    macOSVersion: value("HARBOR_NATIVE_EXPECTED_MACOS_VERSION"),
+    hostArchitecture: value("HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE"),
+    executable,
+    electronVersion,
+    playwrightVersion: value("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION"),
+    electronArchitecture: value("HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE"),
+    electronUuid: value("HARBOR_NATIVE_EXPECTED_ELECTRON_UUID"),
+    electronSha256: value("HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256"),
+    electronPackageJsonSha256: value("HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256"),
+    playwrightPackageJsonSha256: value("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256"),
+    packageJsonSha256: value("HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256"),
+    lockfileSha256: value("HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256"),
+    invocationCwd: worktree,
+    branchStatus: value("HARBOR_NATIVE_EXPECTED_BRANCH_STATUS"),
+    requireCleanWorkingTree: true,
+  };
+  return {
+    expected,
+    missing: EXACT_PROVENANCE_ENVIRONMENT_NAMES.filter((name) => !value(name)),
+  };
 }
 
 export async function collectRunProvenance({

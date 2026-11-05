@@ -9,8 +9,10 @@ import {
   buildFailureError,
   collectRunProvenance,
   errorDiagnostics,
+  expectedProvenanceFromEnvironment,
   finalizeDiagnostics,
   launchProcessDiagnostics,
+  validateExpectedProvenance,
 } from "./launch-diagnostics.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,15 +34,31 @@ const sessionQueueRowsSelector =
   'section[aria-labelledby="session-queue-additions-heading"] tbody tr';
 const completedSessionRowsSelector =
   'section[aria-labelledby="completed-session-heading"] tbody tr';
-const runProvenance = await collectRunProvenance({
+const { expected: expectedProvenance, missing: missingExpectedProvenance } = expectedProvenanceFromEnvironment({
+  worktree: repoRoot,
+  executable: electronExecutable,
+  electronVersion: "44.7.0",
+});
+const collectedProvenance = await collectRunProvenance({
   repoRoot,
   electronExecutable,
+  baseRef: expectedProvenance.baseRef,
   electronPackageJson: path.join(electronPackageRoot, "package.json"),
   playwrightPackageJson: path.join(
     repoRoot,
     "node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
   ),
 });
+const provenanceMismatches = validateExpectedProvenance(collectedProvenance, expectedProvenance);
+const provenanceExpectationErrors = [
+  ...missingExpectedProvenance.map((name) => `exact native provenance expectation is missing: ${name}`),
+  ...provenanceMismatches.map((error) => `exact native provenance mismatch: ${error}`),
+];
+const runProvenance = {
+  ...collectedProvenance,
+  status: collectedProvenance.status && provenanceExpectationErrors.length === 0,
+  errors: [...(collectedProvenance.errors ?? []), ...provenanceExpectationErrors],
+};
 
 function isolatedEnvironment() {
   const environment = Object.fromEntries(
@@ -98,6 +116,11 @@ async function withElectronLaunch(scenario, callback) {
   let child;
   let passed = false;
   let primaryError;
+  const listenerDisposers = [];
+  const listen = (target, event, handler) => {
+    target.on(event, handler);
+    listenerDisposers.push(() => target.removeListener?.(event, handler));
+  };
 
   try {
     if (!runProvenance.status) {
@@ -119,34 +142,34 @@ async function withElectronLaunch(scenario, callback) {
     diagnostics.cleanup.directChildPid = child.pid;
     diagnostics.cleanup.ownership = "playwright-child-handle";
     diagnostics.cleanup.ownershipSource = "electronApp.process()";
-    child.on("error", (error) => {
+    listen(child, "error", (error) => {
       const details = errorDiagnostics(error);
       diagnostics.processErrors.push(details.stack ?? details.message);
     });
-    child.on("exit", (code, signal) => {
+    listen(child, "exit", (code, signal) => {
       diagnostics.processExit = { code, signal };
     });
-    child.on("close", () => {
+    listen(child, "close", () => {
       diagnostics.cleanup.closeObserved = true;
     });
     if (child.stderr) {
       child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk) => {
+      listen(child.stderr, "data", (chunk) => {
         diagnostics.processErrors.push(String(chunk));
       });
     }
 
-    electronApp.on("console", (message) => {
+    listen(electronApp, "console", (message) => {
       diagnostics.electronConsole.push(`${message.type()}: ${message.text()}`);
     });
 
     page = await electronApp.firstWindow({ timeout: timeoutMs });
     diagnostics.startupPhase = "renderer-started";
     page.setDefaultTimeout(timeoutMs);
-    page.on("console", (message) => {
+    listen(page, "console", (message) => {
       diagnostics.pageConsole.push(`${message.type()}: ${message.text()}`);
     });
-    page.on("pageerror", (error) => {
+    listen(page, "pageerror", (error) => {
       diagnostics.pageErrors.push(error.stack ?? error.message);
     });
 
@@ -192,14 +215,19 @@ async function withElectronLaunch(scenario, callback) {
       diagnostics.startupPhase = "application-workflow";
     }
   } finally {
-    const finalization = await finalizeDiagnostics({
-      diagnostics,
-      electronApp,
-      child,
-      passed,
-      profileRoot,
-      timeout: timeoutMs,
-    });
+    let finalization;
+    try {
+      finalization = await finalizeDiagnostics({
+        diagnostics,
+        electronApp,
+        child,
+        passed,
+        profileRoot,
+        timeout: timeoutMs,
+      });
+    } finally {
+      for (const dispose of listenerDisposers.splice(0).reverse()) dispose();
+    }
     const finalError = buildFailureError({
       primaryError,
       diagnosticsPath: finalization.diagnosticsPath,

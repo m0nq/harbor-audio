@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import {
   collectRunProvenance,
   diagnosticsText,
+  expectedProvenanceFromEnvironment,
   sanitizeDiagnosticsText,
   validateExpectedProvenance,
 } from "./launch-diagnostics.mjs";
@@ -747,12 +748,6 @@ export async function persistProbeResult(result, { writeFileFn = writeFile } = {
   return result;
 }
 
-function requiredExpectedEnvironment(name) {
-  const value = process.env[name]?.trim();
-  if (!value) throw new Error(`${name} is required for exact native provenance`);
-  return value;
-}
-
 async function main() {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
   const electronPackageRoot = path.join(
@@ -767,34 +762,18 @@ async function main() {
   let result;
   try {
     runRoot = await createPrivateRunRoot();
-    const expectedBaseRef = process.env.HARBOR_NATIVE_EXPECTED_BASE_REF ?? "feature/harbor-clo-159";
-    const expectedProvenance = {
+    const { expected: expectedProvenance, missing: missingExpectedProvenance } = expectedProvenanceFromEnvironment({
       worktree: repoRoot,
-      baseRef: expectedBaseRef,
-      baseSha: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_BASE_SHA"),
-      headSha: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_HEAD_SHA"),
-      nodeVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_NODE_VERSION"),
-      pnpmVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PNPM_VERSION"),
-      macOSVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_MACOS_VERSION"),
-      hostArchitecture: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE"),
       executable: electronExecutable,
       electronVersion: EXPECTED_ELECTRON_VERSION,
-      playwrightVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION"),
-      electronArchitecture: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE"),
-      electronUuid: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_UUID"),
-      electronSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256"),
-      electronPackageJsonSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256"),
-      playwrightPackageJsonSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256"),
-      packageJsonSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256"),
-      lockfileSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256"),
-      invocationCwd: repoRoot,
-      branchStatus: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_BRANCH_STATUS"),
-      requireCleanWorkingTree: true,
-    };
+    });
+    if (missingExpectedProvenance.length > 0) {
+      throw new Error(`exact native provenance expectations are missing: ${missingExpectedProvenance.join(", ")}`);
+    }
     const provenance = await collectRunProvenance({
       repoRoot,
       electronExecutable,
-      baseRef: expectedBaseRef,
+      baseRef: expectedProvenance.baseRef,
       electronPackageJson: path.join(electronPackageRoot, "package.json"),
       playwrightPackageJson: path.join(
         repoRoot,

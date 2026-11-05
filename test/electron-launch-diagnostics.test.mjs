@@ -49,7 +49,7 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
 
 test("redacts complete delimiter and authorization credential forms", () => {
   const sanitized = sanitizeDiagnosticsText(
-    'token=first,second; password="first;second"; Authorization Basic basic-secret; Authorization Token token-secret; Authorization Custom custom-secret',
+    'token=first,second; password="first;second"; Authorization Basic basic-secret; Authorization Token token-secret; Authorization Custom custom-secret; Authorization Foo+Bar plus-secret; Authorization 123 numeric-secret; Authorization !custom punctuation-secret',
   );
 
   assert.match(sanitized, /token=\[REDACTED\]/);
@@ -57,7 +57,10 @@ test("redacts complete delimiter and authorization credential forms", () => {
   assert.match(sanitized, /Authorization Basic \[REDACTED\]/);
   assert.match(sanitized, /Authorization Token \[REDACTED\]/);
   assert.match(sanitized, /Authorization Custom \[REDACTED\]/);
-  assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret|custom-secret/);
+  assert.match(sanitized, /Authorization Foo\+Bar \[REDACTED\]/);
+  assert.match(sanitized, /Authorization 123 \[REDACTED\]/);
+  assert.match(sanitized, /Authorization !custom \[REDACTED\]/);
+  assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret|custom-secret|plus-secret|numeric-secret|punctuation-secret/);
 });
 
 test("redacts nested and escaped JSON credentials in diagnostic text", () => {
