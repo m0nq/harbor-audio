@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -243,6 +244,60 @@ test("selects exactly one native scenario and fails closed for invalid selectors
     () => createNativeScenarioSelector("  \t  "),
     /must be a non-empty scenario name/,
   );
+});
+
+test("applies native scenario selection at the nested Node test boundary", () => {
+  const convertedTestPath = path.resolve("e2e/converted-electron.test.mjs");
+  const testRunnerArgs = [
+    "--test",
+    "--test-name-pattern=^Converted Slice 1 functional Electron acceptance$",
+    convertedTestPath,
+  ];
+  const runSelection = (selection, { enableNativeSelectDiagnostics = false } = {}) => {
+    const environment = { ...process.env, HARBOR_NATIVE_SCENARIO: selection };
+    for (const name of Object.keys(environment)) {
+      if (name.startsWith("HARBOR_NATIVE_EXPECTED_")) delete environment[name];
+    }
+    delete environment.NODE_TEST_CONTEXT;
+    if (enableNativeSelectDiagnostics) environment.HARBOR_RUN_NATIVE_SELECT_DIAGNOSTICS = "1";
+    else delete environment.HARBOR_RUN_NATIVE_SELECT_DIAGNOSTICS;
+    const result = spawnSync(process.execPath, testRunnerArgs, {
+      cwd: path.resolve("."),
+      env: environment,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    return { ...result, output: `${result.stdout ?? ""}${result.stderr ?? ""}` };
+  };
+
+  const focused = runSelection("filters Converted rows by Album with a conditional selector");
+  assert.equal(focused.status, 1, focused.output);
+  assert.match(focused.output, /skipped 14/);
+  assert.match(focused.output, /filters Converted rows by Album with a conditional selector/);
+  assert.match(focused.output, /Native run provenance is incomplete; refusing Electron launch/);
+
+  const unknown = runSelection("does-not-exist");
+  assert.equal(unknown.status, 1, unknown.output);
+  assert.match(unknown.output, /skipped 15/);
+  assert.match(unknown.output, /did not match a registered native scenario/);
+
+  const optionalWithoutGate = runSelection(
+    "diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions",
+  );
+  assert.equal(optionalWithoutGate.status, 1, optionalWithoutGate.output);
+  assert.match(optionalWithoutGate.output, /did not match a registered native scenario/);
+
+  const optionalWithGate = runSelection(
+    "diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions",
+    { enableNativeSelectDiagnostics: true },
+  );
+  assert.equal(optionalWithGate.status, 1, optionalWithGate.output);
+  assert.doesNotMatch(optionalWithGate.output, /did not match a registered native scenario/);
+  assert.match(optionalWithGate.output, /Native run provenance is incomplete; refusing Electron launch/);
+
+  const blank = runSelection("   ");
+  assert.equal(blank.status, 1, blank.output);
+  assert.match(blank.output, /must be a non-empty scenario name/);
 });
 
 test("records asynchronous process-stream errors as sanitized diagnostics", () => {
