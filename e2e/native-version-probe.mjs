@@ -20,6 +20,12 @@ export const VERSION_PROBE_TIMEOUT_MS = 15_000;
 export const VERSION_PROBE_TERMINATION_GRACE_MS = 2_000;
 export const PROCESS_INSPECTION_TIMEOUT_MS = 5_000;
 export const MAX_CAPTURED_OUTPUT_BYTES = MAX_CAPTURED_STREAM_BYTES;
+export const EXPECTED_ELECTRON_HELPER_NAMES = [
+  "Electron Helper (GPU)",
+  "Electron Helper (Plugin)",
+  "Electron Helper (Renderer)",
+  "Electron Helper",
+];
 export const ELECTRON_OVERRIDE_NAMES = [
   "ELECTRON_CACHE",
   "ELECTRON_MIRROR",
@@ -107,13 +113,22 @@ export async function resolveElectronHelperExecutables(
 ) {
   const frameworksRoot = path.resolve(path.dirname(electronExecutable), "../Frameworks");
   const entries = await readdirFn(frameworksRoot, { withFileTypes: true });
+  const helperEntries = entries.filter((entry) => (
+    entry.isDirectory() && entry.name.startsWith("Electron Helper") && entry.name.endsWith(".app")
+  ));
+  const helperNames = helperEntries.map((entry) => entry.name.slice(0, -4));
+  const missingNames = EXPECTED_ELECTRON_HELPER_NAMES.filter((name) => !helperNames.includes(name));
+  const unexpectedNames = helperNames.filter((name) => !EXPECTED_ELECTRON_HELPER_NAMES.includes(name));
+  if (missingNames.length > 0 || unexpectedNames.length > 0) {
+    throw new Error(
+      `Electron helper bundle set mismatch: missing=${missingNames.join(",") || "none"}; unexpected=${unexpectedNames.join(",") || "none"}`,
+    );
+  }
   const helperExecutables = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !entry.name.startsWith("Electron Helper") || !entry.name.endsWith(".app")) continue;
-    const helperName = entry.name.slice(0, -4);
+  for (const helperName of EXPECTED_ELECTRON_HELPER_NAMES) {
     const helperExecutable = path.join(
       frameworksRoot,
-      entry.name,
+      `${helperName}.app`,
       "Contents",
       "MacOS",
       helperName,

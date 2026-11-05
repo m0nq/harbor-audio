@@ -8,6 +8,7 @@ import {
   buildProbeEnvironment,
   createPrivateRunRoot,
   descendantsOf,
+  EXPECTED_ELECTRON_HELPER_NAMES,
   isExactDirectChild,
   MAX_CAPTURED_OUTPUT_BYTES,
   parseProcessTable,
@@ -115,11 +116,7 @@ test("validates a private mode-700 run root", async () => {
 test("resolves the pinned Electron helper executable paths", async () => {
   const electronExecutable = "/opt/Electron.app/Contents/MacOS/Electron";
   const helperPaths = [];
-  const helperNames = [
-    "Electron Helper (Renderer).app",
-    "Electron Helper.app",
-    "Unrelated.app",
-  ];
+  const helperNames = EXPECTED_ELECTRON_HELPER_NAMES.map((name) => `${name}.app`);
   const helperExecutables = await resolveElectronHelperExecutables(electronExecutable, {
     readdirFn: async () => helperNames.map((name) => ({
       name,
@@ -132,10 +129,31 @@ test("resolves the pinned Electron helper executable paths", async () => {
   });
 
   assert.deepEqual(helperExecutables, [
+    "/opt/Electron.app/Contents/Frameworks/Electron Helper (GPU).app/Contents/MacOS/Electron Helper (GPU)",
+    "/opt/Electron.app/Contents/Frameworks/Electron Helper (Plugin).app/Contents/MacOS/Electron Helper (Plugin)",
     "/opt/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)",
     "/opt/Electron.app/Contents/Frameworks/Electron Helper.app/Contents/MacOS/Electron Helper",
   ]);
   assert.deepEqual(helperPaths, helperExecutables);
+});
+
+test("rejects a missing or unexpected pinned Electron helper", async () => {
+  const electronExecutable = "/opt/Electron.app/Contents/MacOS/Electron";
+  const helperNames = EXPECTED_ELECTRON_HELPER_NAMES
+    .filter((name) => name !== "Electron Helper (Plugin)")
+    .concat("Electron Helper (Unexpected)")
+    .map((name) => `${name}.app`);
+
+  await assert.rejects(
+    resolveElectronHelperExecutables(electronExecutable, {
+      readdirFn: async () => helperNames.map((name) => ({
+        name,
+        isDirectory: () => true,
+      })),
+      statFn: async () => ({ isFile: () => true }),
+    }),
+    /Electron helper bundle set mismatch: missing=Electron Helper \(Plugin\); unexpected=Electron Helper \(Unexpected\)/,
+  );
 });
 
 test("surfaces a retained native run root when setup cleanup fails", async () => {
@@ -163,6 +181,7 @@ test("does not report PASS when a late Electron helper appears after the initial
   const child = fakeChild();
   const executable = "/opt/Electron";
   const helperExecutable = "/opt/Electron.app/Contents/Frameworks/Electron Helper (Renderer).app/Contents/MacOS/Electron Helper (Renderer)";
+  const signals = [];
   const startTime = "Mon Nov  4 12:00:00 2026";
   const helperPid = 4343;
   let phase = "child";
@@ -196,6 +215,7 @@ test("does not report PASS when a late Electron helper appears after the initial
     runRoot: "/private/run-root",
     supervisorPid: 100,
     helperExecutables: [helperExecutable],
+    killFn: (pid, signal) => signals.push([pid, signal]),
     spawnFn: () => {
       setImmediate(() => {
         phase = "helper";
@@ -215,6 +235,7 @@ test("does not report PASS when a late Electron helper appears after the initial
   assert.equal(result.disposition, "CLEANUP_FAILURE");
   assert.deepEqual(result.process.descendants, []);
   assert.deepEqual(result.process.unattributedElectronProcesses.map((record) => record.pid), [helperPid]);
+  assert.deepEqual(signals, []);
   assert.match(result.errors.join("\n"), /unattributed matching Electron process records remain/);
 });
 
