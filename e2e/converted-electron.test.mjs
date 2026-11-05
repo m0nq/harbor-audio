@@ -453,8 +453,19 @@ async function clearSort(page) {
   await page.getByRole("button", { name: "Clear sort", exact: true }).click();
 }
 
+const selectedNativeScenario = process.env.HARBOR_NATIVE_SCENARIO?.trim() || undefined;
+let selectedNativeScenarioFound = !selectedNativeScenario;
+
+async function runScenario(t, name, callback) {
+  if (!selectedNativeScenario || selectedNativeScenario === name) {
+    selectedNativeScenarioFound = true;
+    return t.test(name, callback);
+  }
+  return t.test(name, { skip: `not selected by HARBOR_NATIVE_SCENARIO=${selectedNativeScenario}` }, callback);
+}
+
 test("Converted Slice 1 functional Electron acceptance", async (t) => {
-  await t.test("Converted Electron vertical slice survives three isolated launches", async () => {
+  await runScenario(t, "Converted Electron vertical slice survives three isolated launches", async () => {
     for (const attempt of [1, 2, 3]) {
       await withElectronLaunch(`artist-baseline-${attempt}`, async ({ page }) => {
         const resultRows = await openConverted(page);
@@ -472,7 +483,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     }
   });
 
-  await t.test("filters Converted rows by Album with a conditional selector", async () => {
+  await runScenario(t, "filters Converted rows by Album with a conditional selector", async () => {
     await withElectronLaunch("album-filtering", async ({ page }) => {
       const resultRows = await openConverted(page);
       const albumSelect = await selectConvertedDimension(page, "Album");
@@ -487,7 +498,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("sorts Converted rows by each visible column and clears back to source order", async () => {
+  await runScenario(t, "sorts Converted rows by each visible column and clears back to source order", async () => {
     await withElectronLaunch("sorting-order-and-clear", async ({ page }) => {
       const resultRows = await openConverted(page);
       await assertConvertedResults(page, resultRows, [
@@ -550,7 +561,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("orders Artist and Album options alphabetically with inclusive defaults", async () => {
+  await runScenario(t, "orders Artist and Album options alphabetically with inclusive defaults", async () => {
     await withElectronLaunch("selector-ordering", async ({ page }) => {
       await openConverted(page);
       const dimension = page.getByLabel("Filter by", { exact: true });
@@ -575,7 +586,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("matches Search queries and exposes contextual no-results recovery", async () => {
+  await runScenario(t, "matches Search queries and exposes contextual no-results recovery", async () => {
     await withElectronLaunch("search-empty-state", async ({ page }) => {
       const resultRows = await openConverted(page);
       const search = await setSearch(page, "shared");
@@ -601,7 +612,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("composes Search with active Artist and Album filters", async () => {
+  await runScenario(t, "composes Search with active Artist and Album filters", async () => {
     await withElectronLaunch("search-composition", async ({ page }) => {
       const resultRows = await openConverted(page);
       await selectConvertedDimension(page, "Artist");
@@ -626,7 +637,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("preserves Artist and Album selections across navigation", async () => {
+  await runScenario(t, "preserves Artist and Album selections across navigation", async () => {
     await withElectronLaunch("navigation-preservation", async ({ page }) => {
       const resultRows = await openConverted(page);
       await selectConvertedDimension(page, "Artist");
@@ -653,7 +664,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("composes sorting with filters and Search across navigation", async () => {
+  await runScenario(t, "composes sorting with filters and Search across navigation", async () => {
     await withElectronLaunch("sorting-composition-navigation", async ({ page }) => {
       const resultRows = await openConverted(page);
       await selectConvertedDimension(page, "Artist");
@@ -680,7 +691,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("resets Converted sorting on a fresh isolated launch", async () => {
+  await runScenario(t, "resets Converted sorting on a fresh isolated launch", async () => {
     await withElectronLaunch("sorting-reset-first-launch", async ({ page }) => {
       const resultRows = await openConverted(page);
       await sortBy(page, "Title", "ascending");
@@ -706,7 +717,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("keeps Converting status controls separate from Converted filters", async () => {
+  await runScenario(t, "keeps Converting status controls separate from Converted filters", async () => {
     await withElectronLaunch("view-control-separation", async ({ page }) => {
       await openConverted(page);
       await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
@@ -731,7 +742,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("adds Browser sources to the isolated session queue by keyboard and resets on a fresh launch", async () => {
+  await runScenario(t, "adds Browser sources to the isolated session queue by keyboard and resets on a fresh launch", async () => {
     await withElectronLaunch("browser-session-queue", async ({ page }) => {
       const aurora = page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true });
       const blueHour = page.getByRole("button", { name: "Add Blue Hour to session queue", exact: true });
@@ -786,7 +797,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("connects session completion to Converted while preserving native focus and identity", async () => {
+  await runScenario(t, "connects session completion to Converted while preserving native focus and identity", async () => {
     await withElectronLaunch("session-queue-lifecycle", async ({ page }) => {
       const session = page.locator('section[aria-labelledby="session-queue-additions-heading"]');
       await page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true }).press("Enter");
@@ -851,7 +862,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("advances the isolated Demo lifecycle by keyboard and resets on a fresh launch", async () => {
+  await runScenario(t, "advances the isolated Demo lifecycle by keyboard and resets on a fresh launch", async () => {
     await withElectronLaunch("lifecycle-demo-keyboard", async ({ page }) => {
       await page.getByRole("button", { name: "Converting", exact: true }).click();
       await page.getByRole("heading", { name: "Demo lifecycle", exact: true }).waitFor({ state: "visible" });
@@ -917,7 +928,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
   });
 
   if (process.env.HARBOR_RUN_NATIVE_SELECT_DIAGNOSTICS === "1") {
-  await t.test("diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions", async () => {
+  await runScenario(t, "diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions", async () => {
     const arrowDiagnostics = await runConvertedDimensionDiagnostic(
       "dimension-arrow-down-enter",
       async ({ page }) => {
@@ -950,7 +961,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
   });
   }
 
-  await t.test("preserves keyboard traversal and Search recovery after controlled Artist setup", async () => {
+  await runScenario(t, "preserves keyboard traversal and Search recovery after controlled Artist setup", async () => {
     await withElectronLaunch("keyboard-navigation-and-search", async ({ page }) => {
       const resultRows = await openConvertedWithKeyboard(page);
       const dimension = page.getByLabel("Filter by", { exact: true });
@@ -991,7 +1002,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("supports keyboard sorting and clear-sort recovery without changing selection", async () => {
+  await runScenario(t, "supports keyboard sorting and clear-sort recovery without changing selection", async () => {
     await withElectronLaunch("keyboard-sorting-and-clear", async ({ page }) => {
       const resultRows = await openConvertedWithKeyboard(page);
       const dimension = page.getByLabel("Filter by", { exact: true });
@@ -1015,4 +1026,8 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
       assert.equal(await page.locator("#app").getAttribute("aria-live"), null);
     });
   });
+
+  if (selectedNativeScenario && !selectedNativeScenarioFound) {
+    throw new Error("HARBOR_NATIVE_SCENARIO did not match a registered native scenario");
+  }
 });
