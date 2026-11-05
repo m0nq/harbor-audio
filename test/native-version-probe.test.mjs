@@ -184,8 +184,9 @@ test("does not report PASS when a late Electron helper appears after the initial
 
   assert.equal(result.outcome, "INCONCLUSIVE");
   assert.equal(result.disposition, "CLEANUP_FAILURE");
-  assert.deepEqual(result.process.descendants.map((record) => record.pid), [helperPid]);
-  assert.match(result.errors.join("\n"), /matching Electron process records remain/);
+  assert.deepEqual(result.process.descendants, []);
+  assert.deepEqual(result.process.unattributedElectronProcesses.map((record) => record.pid), [helperPid]);
+  assert.match(result.errors.join("\n"), /unattributed matching Electron process records remain/);
 });
 
 test("returns PASS for an exact version with verified direct-child cleanup", async () => {

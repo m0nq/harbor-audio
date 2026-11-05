@@ -595,22 +595,29 @@ async function terminateOwnedTree({
     errors.push("direct child close was not observed after bounded cleanup");
   }
   let remainingDescendants = [];
+  let unattributedElectronProcesses = [];
   try {
     const remaining = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
-    const lateElectronRecords = remaining.records.filter((record) => (
-      record.pid !== childPid && matchesElectronExecutable(record.command, executable)
+    const knownDescendantPids = new Set([
+      ...initialDescendants,
+      ...remaining.descendants,
+    ].map((record) => record.pid));
+    unattributedElectronProcesses = remaining.records.filter((record) => (
+      record.pid !== childPid
+      && !knownDescendantPids.has(record.pid)
+      && matchesElectronExecutable(record.command, executable)
     ));
     verifiedExit = verifiedExit
       && !remaining.directChildVerified
       && !remaining.childRecord
       && remaining.descendants.length === 0
-      && lateElectronRecords.length === 0;
-    remainingDescendants = [...remaining.descendants, ...lateElectronRecords];
+      && unattributedElectronProcesses.length === 0;
+    remainingDescendants = remaining.descendants;
     if (remainingDescendants.length > 0) {
       errors.push("owned descendant processes remain after bounded cleanup");
     }
-    if (lateElectronRecords.length > 0) {
-      errors.push("matching Electron process records remain after bounded cleanup");
+    if (unattributedElectronProcesses.length > 0) {
+      errors.push("unattributed matching Electron process records remain after bounded cleanup");
     }
   } catch (error) {
     verifiedExit = false;
@@ -630,7 +637,7 @@ async function terminateOwnedTree({
   }
 
   verifiedExit = verifiedExit && errors.length === 0;
-  return { errors, verifiedExit, remainingDescendants };
+  return { errors, verifiedExit, remainingDescendants, unattributedElectronProcesses };
 }
 
 export async function runVersionProbe({
@@ -670,6 +677,7 @@ export async function runVersionProbe({
       ownership: "not-established",
       ownershipSource: "none",
       descendants: [],
+      unattributedElectronProcesses: [],
       termination: [],
     },
     stdout: "",
@@ -817,11 +825,13 @@ export async function runVersionProbe({
         errors: [sanitizeDiagnosticsText(errorMessage(error))],
         verifiedExit: false,
         remainingDescendants: [],
+        unattributedElectronProcesses: [],
       };
     }
     await settleCapturedOutput();
     result.process.termination = cleanup.errors;
     result.process.descendants = cleanup.remainingDescendants;
+    result.process.unattributedElectronProcesses = cleanup.unattributedElectronProcesses;
     for (const error of cleanup.errors) {
       if (!result.errors.includes(error)) result.errors.push(error);
     }

@@ -6,6 +6,7 @@ import path from "node:path";
 import { test } from "node:test";
 import {
   buildFailureError,
+  commandError,
   collectRunProvenance,
   createBoundedDiagnosticsCapture,
   currentInvocationCommand,
@@ -98,6 +99,31 @@ test("redacts credentials in structured command argument arrays", () => {
   ]);
   assert.doesNotMatch(JSON.stringify(sanitized), /raw-array-token/);
   assert.doesNotMatch(JSON.stringify(sanitized), /starts-with-dashes/);
+});
+
+test("does not consume a later option when a sensitive value begins with dashes", () => {
+  const sanitized = JSON.parse(diagnosticsText({
+    invocation: { command: ["node", "--token", "--secret-value", "--keep", "retained"] },
+  }));
+
+  assert.deepEqual(sanitized.invocation.command, [
+    "node",
+    "--token",
+    "[REDACTED]",
+    "--keep",
+    "retained",
+  ]);
+});
+
+test("quotes multi-word command arguments before sanitizing command errors", () => {
+  const sanitized = commandError(
+    "node",
+    ["--password", "raw multi word secret"],
+    new Error("command failed"),
+  );
+
+  assert.match(sanitized, /node --password \[REDACTED\]/);
+  assert.doesNotMatch(sanitized, /raw multi word secret/);
 });
 
 test("bounds UTF-8 diagnostic capture and records truncation", () => {

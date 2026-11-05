@@ -83,14 +83,13 @@ export function sanitizeDiagnosticsValue(value, key = "") {
       const sanitized = [];
       let redactNext = false;
       for (const entry of value) {
-        const isSensitiveOption = /^--[A-Za-z0-9_-]*(?:token|secret|password|passphrase|authorization|cookie|api[_-]?key)[A-Za-z0-9_-]*$/i.test(entry);
         if (redactNext) {
           sanitized.push("[REDACTED]");
           redactNext = false;
-          if (isSensitiveOption) redactNext = true;
           continue;
         }
         redactNext = false;
+        const isSensitiveOption = /^--[A-Za-z0-9_-]*(?:token|secret|password|passphrase|authorization|cookie|api[_-]?key)[A-Za-z0-9_-]*$/i.test(entry);
         const sanitizedEntry = sanitizeDiagnosticsText(entry);
         sanitized.push(sanitizedEntry);
         if (isSensitiveOption) redactNext = true;
@@ -114,8 +113,14 @@ export function diagnosticsText(diagnostics) {
   return JSON.stringify(sanitizeDiagnosticsValue(diagnostics), null, 2);
 }
 
-function commandError(command, args, error) {
-  return `${command} ${args.join(" ")}: ${sanitizeDiagnosticsText(errorMessage(error))}`;
+function formatCommandArgument(value) {
+  const text = String(value);
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(text) ? text : JSON.stringify(text);
+}
+
+export function commandError(command, args, error) {
+  const commandText = [command, ...args].map(formatCommandArgument).join(" ");
+  return `${sanitizeDiagnosticsText(commandText)}: ${sanitizeDiagnosticsText(errorMessage(error))}`;
 }
 
 async function runCommand(command, args, cwd, execFileFn) {
