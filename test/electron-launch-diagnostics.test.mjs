@@ -14,6 +14,7 @@ import {
   expectedProvenanceFromEnvironment,
   launchProcessDiagnostics,
   persistDiagnostics,
+  recordProcessError,
   sanitizeDiagnosticsText,
   validateExpectedProvenance,
   waitForProcessExit,
@@ -89,6 +90,15 @@ test("records the Node exec arguments and resolves the test script path", () => 
     "--test",
     "/approved/worktree/e2e/converted-electron.test.mjs",
   ]);
+});
+
+test("records asynchronous process-stream errors as sanitized diagnostics", () => {
+  const diagnostics = diagnosticsFixture();
+  recordProcessError(diagnostics, new Error("stderr stream failed token=raw-stream-secret"));
+
+  assert.equal(diagnostics.processErrors.length, 1);
+  assert.match(diagnostics.processErrors[0], /stderr stream failed token=\[REDACTED\]/);
+  assert.doesNotMatch(diagnostics.processErrors[0], /raw-stream-secret/);
 });
 
 test("redacts nested and escaped JSON credentials in diagnostic text", () => {

@@ -36,6 +36,14 @@ function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function utf8Prefix(value, maxBytes) {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.byteLength <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
+}
+
 function recordFromLine(line) {
   const match = line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(.+)$/);
   if (!match) return undefined;
@@ -279,7 +287,7 @@ function captureOutput(stream, chunks, label, maxBytes = MAX_CAPTURED_OUTPUT_BYT
         return;
       }
       if (remaining > 0) {
-        const retained = Buffer.from(text, "utf8").subarray(0, remaining).toString("utf8");
+        const retained = utf8Prefix(text, remaining);
         chunks.push(retained);
         state.bytesRetained += Buffer.byteLength(retained, "utf8");
       }

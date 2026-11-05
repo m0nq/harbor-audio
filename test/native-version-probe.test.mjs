@@ -594,7 +594,7 @@ test("bounds retained version-probe output and records truncation", async () => 
         childAlive = false;
         child.exitCode = 0;
         child.signalCode = null;
-        child.stdout.emit("data", "x".repeat(MAX_CAPTURED_OUTPUT_BYTES + 128));
+        child.stdout.emit("data", "x".repeat(MAX_CAPTURED_OUTPUT_BYTES - 1) + "éé");
         child.emit("exit", 0, null);
         child.emit("close", 0, null);
       });
@@ -610,7 +610,7 @@ test("bounds retained version-probe output and records truncation", async () => 
   });
 
   assert.equal(result.outcome, "FAILURE");
-  assert.equal(Buffer.byteLength(result.stdout, "utf8"), MAX_CAPTURED_OUTPUT_BYTES);
+  assert.ok(Buffer.byteLength(result.stdout, "utf8") <= MAX_CAPTURED_OUTPUT_BYTES);
   assert.match(result.errors.join("\n"), /stdout capture exceeded/);
 });
 

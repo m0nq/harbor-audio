@@ -12,6 +12,7 @@ import {
   expectedProvenanceFromEnvironment,
   finalizeDiagnostics,
   launchProcessDiagnostics,
+  recordProcessError,
   validateExpectedProvenance,
 } from "./launch-diagnostics.mjs";
 
@@ -156,6 +157,12 @@ async function withElectronLaunch(scenario, callback) {
       child.stderr.setEncoding("utf8");
       listen(child.stderr, "data", (chunk) => {
         diagnostics.processErrors.push(String(chunk));
+      });
+      listen(child.stderr, "error", (error) => {
+        recordProcessError(diagnostics, error);
+        primaryError ??= error;
+        passed = false;
+        diagnostics.disposition = "FAILURE";
       });
     }
 

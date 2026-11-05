@@ -423,6 +423,12 @@ export function errorDiagnostics(error) {
   };
 }
 
+export function recordProcessError(diagnostics, error) {
+  const details = errorDiagnostics(error);
+  diagnostics.processErrors.push(details.stack ?? details.message);
+  return details;
+}
+
 export function launchProcessDiagnostics(error, { probe = (pid) => process.kill(pid, 0) } = {}) {
   const text = sanitizeDiagnosticsText(errorMessage(error));
   const pidMatch = text.match(/<launched> pid=(\d+)/);
