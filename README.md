@@ -91,6 +91,23 @@ Run the isolated Electron E2E suite from a macOS desktop session:
 /opt/homebrew/bin/node --test e2e/converted-electron.test.mjs
 ```
 
+From an authorized physical macOS Aqua/Terminal session, run the bounded
+version probe before the full GUI suite:
+
+```zsh
+/opt/homebrew/bin/node e2e/native-version-probe.mjs
+```
+
+The probe verifies the exact worktree and Electron artifact, creates a private
+mode-700 evidence root, preserves the normal macOS environment while removing
+only Electron override variables, and launches only the direct child
+`Electron --version` process. It records individual PID/PPID/PGID observations
+but never signals a process group or matches process names. `PASS` requires
+exact version output and verified child/descendant cleanup. `FAILURE`,
+`TIMEOUT`, `INCONCLUSIVE`, or `HOLD` retains the evidence root and stops the
+native sequence; do not proceed to the full GUI suite until the probe is a
+verified `PASS`.
+
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only
 processes and profiles owned by the test. Diagnostics are sanitized before
