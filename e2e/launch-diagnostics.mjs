@@ -28,7 +28,7 @@ const UNQUOTED_SENSITIVE_ASSIGNMENT_PATTERN = new RegExp(
   "gi",
 );
 const AUTHORIZATION_PATTERN = /(\bauthorization\b\s*[:=]\s*)[^\r\n;]*/gi;
-const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+(?:basic|bearer|digest|token)\s+)[^\r\n;]*/gi;
+const AUTHORIZATION_SCHEME_PATTERN = /(\bauthorization\b\s+[A-Za-z][A-Za-z0-9_-]*\s+)[^\r\n;]*/gi;
 const BEARER_PATTERN = /\b(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 const execFile = promisify(defaultExecFile);
 
@@ -117,8 +117,13 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
   compare("base ref", provenance?.baseRef, expectations.baseRef);
   compare("base SHA", provenance?.baseSha, expectations.baseSha);
   compare("head SHA", provenance?.headSha, expectations.headSha);
+  compare("Node version", provenance?.toolchain?.node, expectations.nodeVersion);
+  compare("pnpm version", provenance?.toolchain?.pnpm, expectations.pnpmVersion);
+  compare("macOS version", provenance?.toolchain?.macOS, expectations.macOSVersion);
+  compare("host architecture", provenance?.toolchain?.hostArchitecture, expectations.hostArchitecture);
   compare("executable", provenance?.artifact?.executable, expectations.executable);
   compare("Electron version", provenance?.toolchain?.electron, expectations.electronVersion);
+  compare("Playwright version", provenance?.toolchain?.playwright, expectations.playwrightVersion);
   compare("Electron architecture", provenance?.artifact?.architecture, expectations.electronArchitecture);
   compare("Electron UUID", provenance?.artifact?.uuid, expectations.electronUuid);
   compare("Electron executable SHA-256", provenance?.artifact?.sha256, expectations.electronSha256);
@@ -346,9 +351,13 @@ export function isProcessExited(child) {
 export function waitForProcessExit(
   child,
   timeout = DEFAULT_PROCESS_EXIT_TIMEOUT_MS,
-  { setTimeoutFn = setTimeout, clearTimeoutFn = clearTimeout } = {},
+  {
+    setTimeoutFn = setTimeout,
+    clearTimeoutFn = clearTimeout,
+    isClosed = () => false,
+  } = {},
 ) {
-  if (isProcessExited(child)) return Promise.resolve();
+  if (isClosed()) return Promise.resolve();
 
   return new Promise((resolve, reject) => {
     const onClose = () => {
@@ -385,6 +394,7 @@ export async function finalizeDiagnostics({
   let diagnosticsPath = diagnostics.diagnosticsPath
     ?? path.join(diagnostics.artifactsDir, "electron-e2e-diagnostics.json");
   let removedProfile = false;
+  diagnostics.cleanup.closeObserved ??= false;
 
   const persistCurrentDiagnostics = async () => {
     try {
@@ -397,6 +407,9 @@ export async function finalizeDiagnostics({
 
   if (electronApp) {
     diagnostics.cleanup.closeRequested = true;
+    const processNeedsCloseVerification = () => (
+      child && (!isProcessExited(child) || !diagnostics.cleanup.closeObserved)
+    );
     try {
       await electronApp.close();
     } catch (error) {
@@ -404,9 +417,11 @@ export async function finalizeDiagnostics({
       recordDiagnosticError(diagnostics, error);
     }
 
-    if (child && !isProcessExited(child)) {
+    if (processNeedsCloseVerification()) {
       try {
-        await waitForExit(child, timeout);
+        await waitForExit(child, timeout, {
+          isClosed: () => diagnostics.cleanup.closeObserved,
+        });
       } catch (error) {
         cleanupErrors.push(error);
         recordDiagnosticError(diagnostics, error);
@@ -426,16 +441,18 @@ export async function finalizeDiagnostics({
       }
     }
 
-    if (child && !isProcessExited(child)) {
+    if (processNeedsCloseVerification()) {
       try {
-        await waitForExit(child, killVerificationTimeout);
+        await waitForExit(child, killVerificationTimeout, {
+          isClosed: () => diagnostics.cleanup.closeObserved,
+        });
       } catch (error) {
         cleanupErrors.push(error);
         recordDiagnosticError(diagnostics, error);
       }
     }
 
-    diagnostics.cleanup.verifiedExit = isProcessExited(child);
+    diagnostics.cleanup.verifiedExit = isProcessExited(child) && diagnostics.cleanup.closeObserved;
     if (!diagnostics.cleanup.verifiedExit) {
       const verificationError = new Error("Electron child process exit could not be verified");
       cleanupErrors.push(verificationError);

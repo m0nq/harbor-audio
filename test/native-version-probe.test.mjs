@@ -216,6 +216,9 @@ test("classifies a direct-child spawn error with uncertain cleanup as INCONCLUSI
   assert.equal(result.outcome, "INCONCLUSIVE");
   assert.equal(result.disposition, "CLEANUP_FAILURE");
   assert.match(result.errors.join("\n"), /spawn denied/);
+  assert.equal(child.listenerCount("error"), 0);
+  assert.equal(child.listenerCount("exit"), 0);
+  assert.equal(child.listenerCount("close"), 0);
 });
 
 test("classifies diagnostics-write failure and never leaves a stale PASS", async () => {
@@ -286,6 +289,65 @@ test("downgrades a run when a verified descendant remains after child exit", asy
   assert.equal(result.outcome, "INCONCLUSIVE");
   assert.equal(result.disposition, "CLEANUP_FAILURE");
   assert.deepEqual(result.process.descendants.map((record) => record.pid), [descendantPid]);
+});
+
+test("does not report PASS when a verified descendant is reparented after child exit", async () => {
+  const child = fakeChild();
+  let phase = "alive";
+  const executable = "/opt/Electron";
+  const startTime = "Mon Nov  4 12:00:00 2026";
+  const descendantPid = 4343;
+  const processLine = (pid, ppid, command) => (
+    String(pid) + " " + String(ppid) + " " + String(pid) + " " + startTime + " " + command + "\n"
+  );
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p") {
+      const pid = Number(args[1]);
+      if (pid === 100) return { stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs") };
+      if (pid === child.pid && phase === "alive") return { stdout: processLine(child.pid, 100, executable + " --version") };
+      if (pid === descendantPid) {
+        return { stdout: processLine(descendantPid, phase === "alive" ? child.pid : 1, executable + " Helper") };
+      }
+      const error = new Error("process not found");
+      error.code = 1;
+      throw error;
+    }
+    if (args[0] === "-axo") {
+      return {
+        stdout: processLine(100, 1, "/opt/homebrew/bin/node supervisor.mjs")
+          + (phase === "alive" ? processLine(child.pid, 100, executable + " --version") : "")
+          + processLine(descendantPid, phase === "alive" ? child.pid : 1, executable + " Helper"),
+      };
+    }
+    throw new Error("unexpected ps invocation");
+  };
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    spawnFn: () => {
+      setImmediate(() => {
+        phase = "reparented";
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("data", "44.7.0\n");
+        child.emit("exit", 0, null);
+        child.emit("close", 0, null);
+      });
+      return child;
+    },
+    execFileFn,
+    killFn: () => {},
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(result.process.descendants.map((record) => record.pid), [descendantPid]);
+  assert.match(result.errors.join("\n"), /owned descendant snapshot remains/);
 });
 
 test("classifies a synchronous spawn exception without leaking an unhandled failure", async () => {
@@ -488,4 +550,44 @@ test("preserves an inspection failure and still attempts only the direct child h
   assert.ok(processTableCalls >= 1);
   assert.match(result.errors.join("\n"), /ps inspection unavailable/);
   assert.doesNotMatch(result.errors.join("\n"), /process-group signal/);
+});
+
+test("uses the launch handle when ps has no record for the still-live direct child", async () => {
+  const child = fakeChild();
+  const signals = [];
+  child.kill = (signal) => {
+    signals.push(signal);
+    child.signalCode = signal;
+    child.emit("exit", null, signal);
+    child.emit("close", null, signal);
+    return true;
+  };
+  const execFileFn = async (command, args) => {
+    assert.equal(command, "/bin/ps");
+    if (args[0] === "-p" && Number(args[1]) === 100) {
+      return { stdout: "100 1 100 Mon Nov  4 12:00:00 2026 /opt/homebrew/bin/node supervisor.mjs\n" };
+    }
+    if (args[0] === "-axo") {
+      return { stdout: "100 1 100 Mon Nov  4 12:00:00 2026 /opt/homebrew/bin/node supervisor.mjs\n" };
+    }
+    const error = new Error("process not found");
+    error.code = 1;
+    throw error;
+  };
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: "/opt/Electron",
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    graceMs: 1,
+    spawnFn: () => child,
+    execFileFn,
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.deepEqual(signals, ["SIGTERM"]);
+  assert.match(result.errors.join("\n"), /direct child identity could not be reverified/);
 });

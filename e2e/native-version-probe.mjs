@@ -158,19 +158,27 @@ function observeChildLifecycle(child) {
     closeObserved: false,
     error: undefined,
   };
-  child.on?.("exit", (code, signal) => {
+  const onExit = (code, signal) => {
     state.exitObserved = true;
     state.exitObservation = { code, signal };
-  });
-  child.on?.("close", (code, signal) => {
+  };
+  const onClose = (code, signal) => {
     state.closeObserved = true;
     if (!state.exitObserved && (code !== undefined || signal !== undefined)) {
       state.exitObservation = { code, signal };
     }
-  });
-  child.on?.("error", (error) => {
+  };
+  const onError = (error) => {
     state.error ??= error;
-  });
+  };
+  child.on?.("exit", onExit);
+  child.on?.("close", onClose);
+  child.on?.("error", onError);
+  state.dispose = () => {
+    child.removeListener?.("exit", onExit);
+    child.removeListener?.("close", onClose);
+    child.removeListener?.("error", onError);
+  };
   return state;
 }
 
@@ -219,6 +227,7 @@ function waitForChild(
     const onError = (error) => {
       if (!settled) {
         settled = true;
+        cleanupListeners();
         reject(error);
       }
     };
@@ -241,6 +250,7 @@ function waitForChild(
         settled = true;
         const error = new Error(`Electron version probe exceeded ${timeoutMs}ms`);
         error.code = "ERR_VERSION_PROBE_TIMEOUT";
+        cleanupListeners();
         reject(error);
       }
     }, timeoutMs);
@@ -305,18 +315,27 @@ function killDirectChildHandle(child, signal, errors) {
   }
 }
 
-async function signalVerifiedDescendants({ records, signal, killFn, execFileFn }) {
+function sameProcessIdentity(current, record, allowReparented = false) {
+  return current
+    && current.pid === record.pid
+    && current.pgid === record.pgid
+    && current.startTime === record.startTime
+    && current.command === record.command
+    && (allowReparented || current.ppid === record.ppid);
+}
+
+async function signalVerifiedDescendants({
+  records,
+  signal,
+  killFn,
+  execFileFn,
+  allowReparented = false,
+}) {
   const errors = [];
   for (const record of sortForTermination(records)) {
     try {
       const current = await processRecord(record.pid, execFileFn);
-      const sameProcess = current
-        && current.pid === record.pid
-        && current.ppid === record.ppid
-        && current.pgid === record.pgid
-        && current.startTime === record.startTime
-        && current.command === record.command;
-      if (!sameProcess) {
+      if (!sameProcessIdentity(current, record, allowReparented)) {
         errors.push("descendant PID " + record.pid + " failed identity recheck; no " + signal + " sent");
         continue;
       }
@@ -326,6 +345,24 @@ async function signalVerifiedDescendants({ records, signal, killFn, execFileFn }
     }
   }
   return errors;
+}
+
+async function recheckDescendants(records, execFileFn) {
+  const errors = [];
+  const remaining = [];
+  for (const record of records) {
+    try {
+      const current = await processRecord(record.pid, execFileFn);
+      if (sameProcessIdentity(current, record, true)) {
+        remaining.push(current);
+      } else if (current) {
+        errors.push("descendant PID " + record.pid + " failed final identity recheck");
+      }
+    } catch (error) {
+      errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+    }
+  }
+  return { errors, remaining };
 }
 
 async function terminateOwnedTree({
@@ -339,21 +376,34 @@ async function terminateOwnedTree({
   setTimeoutFn,
   clearTimeoutFn,
   lifecycle,
+  initialDescendants = [],
 }) {
   const errors = [];
   let ownership;
   try {
     ownership = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
-    if (!ownership.directChildVerified && !childExited(child)) {
-      errors.push("direct child identity could not be reverified; no PID signal sent");
+    const descendantSnapshot = new Map(
+      [...initialDescendants, ...(ownership.directChildVerified ? ownership.descendants : [])]
+        .map((record) => [record.pid, record]),
+    );
+    if (!ownership.directChildVerified && !childExited(child) && descendantSnapshot.size === 0) {
+      errors.push("direct child identity could not be reverified; no descendant PID signal sent");
+      if (!ownership.childRecord) {
+        killDirectChildHandle(child, "SIGTERM", errors);
+      } else {
+        errors.push("conflicting direct-child process identity; no handle signal sent");
+      }
     } else {
       errors.push(...await signalVerifiedDescendants({
-        records: ownership.descendants,
+        records: [...descendantSnapshot.values()],
         signal: "SIGTERM",
         killFn,
         execFileFn,
+        allowReparented: true,
       }));
-      if (!childExited(child)) child.kill?.("SIGTERM");
+      if (ownership.directChildVerified && !childExited(child)) {
+        killDirectChildHandle(child, "SIGTERM", errors);
+      }
     }
   } catch (error) {
     errors.push(sanitizeDiagnosticsText(errorMessage(error)));
@@ -379,18 +429,36 @@ async function terminateOwnedTree({
     try {
       const current = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });
       if (current.directChildVerified) {
+        const descendantSnapshot = new Map(
+          [...initialDescendants, ...current.descendants].map((record) => [record.pid, record]),
+        );
         errors.push(...await signalVerifiedDescendants({
-          records: current.descendants,
+          records: [...descendantSnapshot.values()],
           signal: "SIGKILL",
           killFn,
           execFileFn,
+          allowReparented: true,
         }));
-        child.kill?.("SIGKILL");
+        killDirectChildHandle(child, "SIGKILL", errors);
+      } else if (initialDescendants.length > 0) {
+        errors.push(...await signalVerifiedDescendants({
+          records: initialDescendants,
+          signal: "SIGKILL",
+          killFn,
+          execFileFn,
+          allowReparented: true,
+        }));
+      } else if (!current.childRecord) {
+        killDirectChildHandle(child, "SIGKILL", errors);
       } else {
         errors.push("direct child identity could not be verified for escalation; no SIGKILL sent");
       }
     } catch (error) {
       errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+      if (!childExited(child)) {
+        errors.push("process table unavailable for escalation; no descendant PID signal sent");
+        killDirectChildHandle(child, "SIGKILL", errors);
+      }
     }
   }
 
@@ -417,6 +485,18 @@ async function terminateOwnedTree({
   } catch (error) {
     verifiedExit = false;
     errors.push(sanitizeDiagnosticsText(errorMessage(error)));
+  }
+
+  if (initialDescendants.length > 0) {
+    const snapshot = await recheckDescendants(initialDescendants, execFileFn);
+    const byPid = new Map(remainingDescendants.map((record) => [record.pid, record]));
+    for (const record of snapshot.remaining) byPid.set(record.pid, record);
+    remainingDescendants = [...byPid.values()];
+    errors.push(...snapshot.errors);
+    if (snapshot.remaining.length > 0) {
+      verifiedExit = false;
+      errors.push("owned descendant snapshot remains after bounded cleanup");
+    }
   }
 
   verifiedExit = verifiedExit && errors.length === 0;
@@ -500,11 +580,19 @@ export async function runVersionProbe({
     result.errors.push(sanitizeDiagnosticsText(errorMessage(error)));
     return result;
   }
+  if (!child || typeof child !== "object") {
+    result.startupPhase = "electron-launch";
+    result.outcome = "FAILURE";
+    result.disposition = "FAILURE";
+    result.errors.push("spawn did not return a child-process handle");
+    return result;
+  }
   const lifecycle = observeChildLifecycle(child);
   const stdout = [];
   const stderr = [];
   const stdoutState = captureOutput(child.stdout, stdout);
   const stderrState = captureOutput(child.stderr, stderr);
+  let initialDescendants = [];
   if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
     result.startupPhase = "electron-launch";
     result.outcome = "INCONCLUSIVE";
@@ -521,6 +609,7 @@ export async function runVersionProbe({
     result.stdout = stdout.join("");
     result.stderr = stderr.join("");
     result.errors.push("direct child PID was unavailable; descendant cleanup could not be verified");
+    lifecycle.dispose?.();
     return result;
   }
 
@@ -543,6 +632,7 @@ export async function runVersionProbe({
         setTimeoutFn,
         clearTimeoutFn,
         lifecycle,
+        initialDescendants,
       });
     } catch (error) {
       cleanup = {
@@ -550,10 +640,14 @@ export async function runVersionProbe({
         verifiedExit: false,
         remainingDescendants: [],
       };
+    } finally {
+      lifecycle.dispose?.();
     }
     result.process.termination = cleanup.errors;
     result.process.descendants = cleanup.remainingDescendants;
-    result.errors.push(...cleanup.errors);
+    for (const error of cleanup.errors) {
+      if (!result.errors.includes(error)) result.errors.push(error);
+    }
     if (!cleanup.verifiedExit) {
       result.outcome = "INCONCLUSIVE";
       result.disposition = "CLEANUP_FAILURE";
@@ -570,6 +664,7 @@ export async function runVersionProbe({
       execFileFn,
     });
     result.process.directChildPgid = ownership.childRecord?.pgid;
+    initialDescendants = ownership.directChildVerified ? ownership.descendants : [];
     if (!ownership.directChildVerified && !childExited(child)) {
       result.outcome = "INCONCLUSIVE";
       result.disposition = "INCONCLUSIVE";
@@ -668,8 +763,13 @@ async function main() {
       baseRef: expectedBaseRef,
       baseSha: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_BASE_SHA"),
       headSha: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_HEAD_SHA"),
+      nodeVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_NODE_VERSION"),
+      pnpmVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PNPM_VERSION"),
+      macOSVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_MACOS_VERSION"),
+      hostArchitecture: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE"),
       executable: electronExecutable,
       electronVersion: EXPECTED_ELECTRON_VERSION,
+      playwrightVersion: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION"),
       electronArchitecture: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE"),
       electronUuid: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_UUID"),
       electronSha256: requiredExpectedEnvironment("HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256"),

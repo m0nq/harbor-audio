@@ -99,7 +99,12 @@ env \
   HARBOR_NATIVE_EXPECTED_BASE_REF='feature/harbor-clo-159' \
   HARBOR_NATIVE_EXPECTED_BASE_SHA='<approved-base-sha>' \
   HARBOR_NATIVE_EXPECTED_HEAD_SHA='<approved-exact-head-sha>' \
+  HARBOR_NATIVE_EXPECTED_NODE_VERSION='<approved-node-version>' \
+  HARBOR_NATIVE_EXPECTED_PNPM_VERSION='12.12.1' \
+  HARBOR_NATIVE_EXPECTED_MACOS_VERSION='<approved-macos-version>' \
+  HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE='<approved-host-architecture>' \
   HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE='<approved-artifact-architecture>' \
+  HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION='<approved-playwright-version>' \
   HARBOR_NATIVE_EXPECTED_ELECTRON_UUID='<approved-artifact-uuid>' \
   HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256='<approved-executable-sha256>' \
   HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256='<approved-electron-package-sha256>' \

@@ -13,6 +13,7 @@ import {
   persistDiagnostics,
   sanitizeDiagnosticsText,
   validateExpectedProvenance,
+  waitForProcessExit,
 } from "../e2e/launch-diagnostics.mjs";
 
 function diagnosticsFixture() {
@@ -48,14 +49,15 @@ test("sanitizes sensitive diagnostic values while retaining failure context", as
 
 test("redacts complete delimiter and authorization credential forms", () => {
   const sanitized = sanitizeDiagnosticsText(
-    'token=first,second; password="first;second"; Authorization Basic basic-secret; Authorization Token token-secret',
+    'token=first,second; password="first;second"; Authorization Basic basic-secret; Authorization Token token-secret; Authorization Custom custom-secret',
   );
 
   assert.match(sanitized, /token=\[REDACTED\]/);
   assert.match(sanitized, /password="\[REDACTED\]"/);
   assert.match(sanitized, /Authorization Basic \[REDACTED\]/);
   assert.match(sanitized, /Authorization Token \[REDACTED\]/);
-  assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret/);
+  assert.match(sanitized, /Authorization Custom \[REDACTED\]/);
+  assert.doesNotMatch(sanitized, /first,second|first;second|basic-secret|token-secret|custom-secret/);
 });
 
 test("redacts nested and escaped JSON credentials in diagnostic text", () => {
@@ -122,8 +124,13 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
     baseRef: "feature/harbor-clo-159",
     baseSha: provenance.baseSha,
     headSha: provenance.headSha,
+    nodeVersion: provenance.toolchain.node,
+    pnpmVersion: provenance.toolchain.pnpm,
+    macOSVersion: provenance.toolchain.macOS,
+    hostArchitecture: provenance.toolchain.hostArchitecture,
     executable: electronExecutable,
     electronVersion: "44.7.0",
+    playwrightVersion: provenance.toolchain.playwright,
     electronArchitecture: "arm64",
     electronUuid: "4C4C44AF-5555-3144-A1E7-7E571B4F50E9",
     electronSha256: provenance.artifact.sha256,
@@ -138,6 +145,10 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   assert.match(
     validateExpectedProvenance(provenance, { headSha: "f".repeat(40) }).join("\n"),
     /head SHA expected/,
+  );
+  assert.match(
+    validateExpectedProvenance(provenance, { pnpmVersion: "12.12.0" }).join("\n"),
+    /pnpm version expected/,
   );
 });
 
@@ -292,9 +303,10 @@ test("forced termination is followed by bounded exit verification before cleanup
   let waits = 0;
   let killCalls = 0;
   let removed = false;
+  const diagnostics = diagnosticsFixture();
 
   const result = await finalizeDiagnostics({
-    diagnostics: diagnosticsFixture(),
+    diagnostics,
     electronApp: { close: async () => {} },
     child,
     passed: true,
@@ -306,6 +318,8 @@ test("forced termination is followed by bounded exit verification before cleanup
       if (waits === 1) throw new Error("initial exit timeout");
       child.exitCode = null;
       child.signalCode = "SIGTERM";
+      diagnostics.cleanup.closeObserved = true;
+      child.emit("close");
     },
     kill: () => {
       killCalls += 1;
@@ -325,6 +339,21 @@ test("forced termination is followed by bounded exit verification before cleanup
   assert.equal(result.cleanupErrors.length, 1);
   assert.equal(result.removedProfile, false);
   assert.equal(removed, false);
+});
+
+test("waits for close even when the child exit code is already available", async () => {
+  const child = new EventEmitter();
+  child.exitCode = 0;
+  child.signalCode = null;
+  let closeObserved = false;
+  const pending = waitForProcessExit(child, 50, {
+    isClosed: () => closeObserved,
+  });
+  setImmediate(() => {
+    closeObserved = true;
+    child.emit("close");
+  });
+  await pending;
 });
 
 test("persistence failure retains the profile after an otherwise successful callback", async () => {

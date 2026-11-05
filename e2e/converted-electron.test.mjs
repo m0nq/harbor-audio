@@ -90,6 +90,7 @@ async function withElectronLaunch(scenario, callback) {
       launchProcess: undefined,
       killAttempted: false,
       verifiedExit: false,
+      closeObserved: false,
     },
   };
   let electronApp;
@@ -124,6 +125,9 @@ async function withElectronLaunch(scenario, callback) {
     });
     child.on("exit", (code, signal) => {
       diagnostics.processExit = { code, signal };
+    });
+    child.on("close", () => {
+      diagnostics.cleanup.closeObserved = true;
     });
     if (child.stderr) {
       child.stderr.setEncoding("utf8");
