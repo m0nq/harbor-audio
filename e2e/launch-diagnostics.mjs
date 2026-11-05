@@ -119,8 +119,9 @@ function formatCommandArgument(value) {
 }
 
 export function commandError(command, args, error) {
-  const commandText = [command, ...args].map(formatCommandArgument).join(" ");
-  return `${sanitizeDiagnosticsText(commandText)}: ${sanitizeDiagnosticsText(errorMessage(error))}`;
+  const sanitizedArgs = sanitizeDiagnosticsValue(args, "command");
+  const commandText = [sanitizeDiagnosticsText(command), ...sanitizedArgs].map(formatCommandArgument).join(" ");
+  return `${commandText}: ${sanitizeDiagnosticsText(errorMessage(error))}`;
 }
 
 async function runCommand(command, args, cwd, execFileFn) {

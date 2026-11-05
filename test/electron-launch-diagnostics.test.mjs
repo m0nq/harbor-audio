@@ -118,12 +118,12 @@ test("does not consume a later option when a sensitive value begins with dashes"
 test("quotes multi-word command arguments before sanitizing command errors", () => {
   const sanitized = commandError(
     "node",
-    ["--password", "raw multi word secret"],
+    ["--password", "raw multi word \"quoted\" secret"],
     new Error("command failed"),
   );
 
-  assert.match(sanitized, /node --password \[REDACTED\]/);
-  assert.doesNotMatch(sanitized, /raw multi word secret/);
+  assert.match(sanitized, /node --password "\[REDACTED\]"/);
+  assert.doesNotMatch(sanitized, /raw multi word|quoted/);
 });
 
 test("bounds UTF-8 diagnostic capture and records truncation", () => {
