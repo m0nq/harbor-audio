@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 export const DEFAULT_PROCESS_EXIT_TIMEOUT_MS = 15_000;
 export const DEFAULT_KILL_VERIFICATION_TIMEOUT_MS = 2_000;
 export const DEFAULT_COMMAND_TIMEOUT_MS = 10_000;
+export const MAX_CAPTURED_STREAM_BYTES = 1024 * 1024;
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
 const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|password|passphrase|secret|token|api[_-]?key)/i;
 const SENSITIVE_NAME_PATTERN = "(?:(?:[A-Za-z0-9]+[_-])*(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)(?:[_-][A-Za-z0-9]+)*|[A-Za-z0-9]*?(?:authorization|cookie|password|passphrase|secret|token|access[_-]?token|refresh[_-]?token|id[_-]?token|session[_-]?token|api[_-]?key)[A-Za-z0-9]*)";
@@ -112,6 +113,14 @@ function firstMatch(value, pattern) {
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function utf8Prefix(value, maxBytes) {
+  const bytes = Buffer.from(value, "utf8");
+  if (bytes.byteLength <= maxBytes) return value;
+  let end = maxBytes;
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return bytes.subarray(0, end).toString("utf8");
 }
 
 export function currentInvocationCommand({
@@ -596,9 +605,10 @@ export async function finalizeDiagnostics({
   const cleanupSucceeded = !electronApp || (
     cleanupErrors.length === 0 && diagnostics.cleanup.verifiedExit
   );
-  if (passed && (!cleanupSucceeded || persistenceError)) diagnostics.disposition = "CLEANUP_FAILURE";
+  if (diagnostics.processFailure) diagnostics.disposition = "FAILURE";
+  if (passed && !diagnostics.processFailure && (!cleanupSucceeded || persistenceError)) diagnostics.disposition = "CLEANUP_FAILURE";
   if (cleanupErrors.length > 0 || persistenceError) await persistCurrentDiagnostics();
-  if (passed && cleanupSucceeded && !persistenceError) {
+  if (passed && !diagnostics.processFailure && cleanupSucceeded && !persistenceError) {
     try {
       await removeProfile(profileRoot, { recursive: true, force: true });
       removedProfile = true;

@@ -16,6 +16,7 @@ import {
   persistDiagnostics,
   recordProcessError,
   sanitizeDiagnosticsText,
+  utf8Prefix,
   validateExpectedProvenance,
   waitForProcessExit,
 } from "../e2e/launch-diagnostics.mjs";
@@ -99,6 +100,32 @@ test("records asynchronous process-stream errors as sanitized diagnostics", () =
   assert.equal(diagnostics.processErrors.length, 1);
   assert.match(diagnostics.processErrors[0], /stderr stream failed token=\[REDACTED\]/);
   assert.doesNotMatch(diagnostics.processErrors[0], /raw-stream-secret/);
+});
+
+test("retains a failed profile when a process error arrives before finalization", async () => {
+  const diagnostics = diagnosticsFixture();
+  diagnostics.processFailure = true;
+  diagnostics.disposition = "FAILURE";
+  let removed = false;
+
+  await finalizeDiagnostics({
+    diagnostics,
+    passed: true,
+    profileRoot: "/tmp/harbor-profile",
+    persist: async () => "/tmp/harbor-diagnostics.json",
+    removeProfile: async () => {
+      removed = true;
+    },
+  });
+
+  assert.equal(removed, false);
+  assert.equal(diagnostics.disposition, "FAILURE");
+});
+
+test("keeps UTF-8 diagnostic prefixes within the byte bound", () => {
+  const prefix = utf8Prefix("x".repeat(3) + "é", 4);
+  assert.ok(Buffer.byteLength(prefix, "utf8") <= 4);
+  assert.equal(prefix, "xxx");
 });
 
 test("redacts nested and escaped JSON credentials in diagnostic text", () => {

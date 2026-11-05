@@ -12,7 +12,9 @@ import {
   expectedProvenanceFromEnvironment,
   finalizeDiagnostics,
   launchProcessDiagnostics,
+  MAX_CAPTURED_STREAM_BYTES,
   recordProcessError,
+  utf8Prefix,
   validateExpectedProvenance,
 } from "./launch-diagnostics.mjs";
 
@@ -97,6 +99,7 @@ async function withElectronLaunch(scenario, callback) {
     pageConsole: [],
     pageErrors: [],
     processErrors: [],
+    processFailure: false,
     processExit: undefined,
     launchError: undefined,
     startupPhase: "prelaunch",
@@ -117,10 +120,19 @@ async function withElectronLaunch(scenario, callback) {
   let child;
   let passed = false;
   let primaryError;
+  let stderrBytes = 0;
+  let stderrTruncated = false;
   const listenerDisposers = [];
   const listen = (target, event, handler) => {
     target.on(event, handler);
     listenerDisposers.push(() => target.removeListener?.(event, handler));
+  };
+  const markProcessFailure = (error) => {
+    recordProcessError(diagnostics, error);
+    diagnostics.processFailure = true;
+    primaryError ??= error;
+    passed = false;
+    diagnostics.disposition = "FAILURE";
   };
 
   try {
@@ -144,8 +156,7 @@ async function withElectronLaunch(scenario, callback) {
     diagnostics.cleanup.ownership = "playwright-child-handle";
     diagnostics.cleanup.ownershipSource = "electronApp.process()";
     listen(child, "error", (error) => {
-      const details = errorDiagnostics(error);
-      diagnostics.processErrors.push(details.stack ?? details.message);
+      markProcessFailure(error);
     });
     listen(child, "exit", (code, signal) => {
       diagnostics.processExit = { code, signal };
@@ -156,13 +167,25 @@ async function withElectronLaunch(scenario, callback) {
     if (child.stderr) {
       child.stderr.setEncoding("utf8");
       listen(child.stderr, "data", (chunk) => {
-        diagnostics.processErrors.push(String(chunk));
+        if (stderrTruncated) return;
+        const text = String(chunk);
+        const bytes = Buffer.byteLength(text, "utf8");
+        const remaining = MAX_CAPTURED_STREAM_BYTES - stderrBytes;
+        if (bytes <= remaining) {
+          diagnostics.processErrors.push(text);
+          stderrBytes += bytes;
+          return;
+        }
+        if (remaining > 0) {
+          const retained = utf8Prefix(text, remaining);
+          diagnostics.processErrors.push(retained);
+          stderrBytes += Buffer.byteLength(retained, "utf8");
+        }
+        stderrTruncated = true;
+        markProcessFailure(new Error(`Electron stderr capture exceeded ${MAX_CAPTURED_STREAM_BYTES} bytes; output truncated`));
       });
       listen(child.stderr, "error", (error) => {
-        recordProcessError(diagnostics, error);
-        primaryError ??= error;
-        passed = false;
-        diagnostics.disposition = "FAILURE";
+        markProcessFailure(error);
       });
     }
 

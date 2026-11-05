@@ -8,7 +8,9 @@ import {
   collectRunProvenance,
   diagnosticsText,
   expectedProvenanceFromEnvironment,
+  MAX_CAPTURED_STREAM_BYTES,
   sanitizeDiagnosticsText,
+  utf8Prefix,
   validateExpectedProvenance,
 } from "./launch-diagnostics.mjs";
 
@@ -16,7 +18,7 @@ export const EXPECTED_ELECTRON_VERSION = "44.7.0";
 export const VERSION_PROBE_TIMEOUT_MS = 15_000;
 export const VERSION_PROBE_TERMINATION_GRACE_MS = 2_000;
 export const PROCESS_INSPECTION_TIMEOUT_MS = 5_000;
-export const MAX_CAPTURED_OUTPUT_BYTES = 1024 * 1024;
+export const MAX_CAPTURED_OUTPUT_BYTES = MAX_CAPTURED_STREAM_BYTES;
 export const ELECTRON_OVERRIDE_NAMES = [
   "ELECTRON_CACHE",
   "ELECTRON_MIRROR",
@@ -34,14 +36,6 @@ function processDiagnosticEnvironment() {
 
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
-}
-
-function utf8Prefix(value, maxBytes) {
-  const bytes = Buffer.from(value, "utf8");
-  if (bytes.byteLength <= maxBytes) return value;
-  let end = maxBytes;
-  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
-  return bytes.subarray(0, end).toString("utf8");
 }
 
 function recordFromLine(line) {
@@ -508,7 +502,10 @@ async function terminateOwnedTree({
     }
   }
 
-  let verifiedExit = childExited(child);
+  let verifiedExit = childExited(child) && Boolean(lifecycle?.closeObserved);
+  if (childExited(child) && !lifecycle?.closeObserved) {
+    errors.push("direct child close was not observed after bounded cleanup");
+  }
   let remainingDescendants = [];
   try {
     const remaining = await ownedProcessRecords({ childPid, supervisorPid, executable, execFileFn });

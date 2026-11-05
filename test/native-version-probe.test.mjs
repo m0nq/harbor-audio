@@ -799,3 +799,39 @@ test("does not report PASS when the child exits before ownership can be observed
   assert.notEqual(result.outcome, "PASS");
   assert.match(result.errors.join("\n"), /ownership was not verified/);
 });
+
+test("does not verify cleanup when child close is never observed", async () => {
+  const child = fakeChild();
+  let childAlive = true;
+  const executable = "/opt/Electron";
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: executable,
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    timeoutMs: 50,
+    graceMs: 1,
+    spawnFn: () => {
+      setImmediate(() => {
+        childAlive = false;
+        child.exitCode = 0;
+        child.signalCode = null;
+        child.stdout.emit("data", "v44.7.0\n");
+        child.emit("exit", 0, null);
+      });
+      return child;
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: child.pid,
+      executable,
+      childAlive: () => childAlive,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(result.outcome, "INCONCLUSIVE");
+  assert.equal(result.disposition, "CLEANUP_FAILURE");
+  assert.match(result.errors.join("\n"), /close was not observed/);
+});
