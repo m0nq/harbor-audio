@@ -24,6 +24,7 @@ import {
   recordProcessError,
   sanitizeDiagnosticsText,
   utf8Prefix,
+  validateNativeElectronEnvironment,
   validateExpectedProvenance,
   waitForProcessExit,
 } from "../e2e/launch-diagnostics.mjs";
@@ -251,7 +252,7 @@ test("matches the operator test command to a Node worker contract without compar
   );
   assert.match(
     validateExpectedProvenance(
-      { invocation: { command: [nodeExecutable, "--test-isolation=none", ...workerCommand.slice(1)] } },
+      { invocation: { command: [nodeExecutable, ...workerCommand.slice(1).map((argument) => argument === "--test-isolation=process" ? "--test-isolation=none" : argument)] } },
       { invocationCommand: operatorCommand },
     ).join("\n"),
     /invocation testIsolation expected "process" but was "none"/,
@@ -333,6 +334,56 @@ test("compares every modeled Node test control while rejecting changed values", 
     );
     assert.match(mismatches.join("\n"), mismatchPattern);
   }
+});
+
+test("fails closed for environment and strict Node option provenance", () => {
+  assert.deepEqual(validateNativeElectronEnvironment({ NODE_OPTIONS: "--require=/tmp/loader.mjs" }), ["NODE_OPTIONS"]);
+  assert.deepEqual(validateNativeElectronEnvironment({ NODE_OPTIONS: "  " }), []);
+  assert.deepEqual(validateNativeElectronEnvironment({}), []);
+
+  const executable = "/opt/homebrew/bin/node";
+  const testFile = "/approved/worktree/e2e/converted-electron.test.mjs";
+  const expected = [executable, "--test", "--test-only", testFile];
+
+  const shortLoader = nodeTestInvocationContract([executable, "-r", "/tmp/loader.mjs", testFile]);
+  assert.equal(shortLoader.valid, false);
+  assert.deepEqual(shortLoader.unmodeledOptions, ["-r"]);
+
+  const explicitFalse = nodeTestInvocationContract([executable, "--test-only=false", testFile]);
+  assert.equal(explicitFalse.valid, true);
+  assert.equal(explicitFalse.testOnly, false);
+  assert.match(
+    validateExpectedProvenance({ invocation: { command: [executable, "--test-only=false", testFile] } }, {
+      invocationCommand: expected,
+    }).join("\n"),
+    /invocation testOnly expected true but was false/,
+  );
+
+  const malformedBoolean = nodeTestInvocationContract([executable, "--test-only=maybe", testFile]);
+  assert.equal(malformedBoolean.valid, false);
+  assert.deepEqual(malformedBoolean.unmodeledOptions, ["--test-only"]);
+
+  const malformedTestMode = nodeTestInvocationContract([executable, "--test=false", testFile]);
+  assert.equal(malformedTestMode.valid, false);
+  assert.deepEqual(malformedTestMode.unmodeledOptions, ["--test"]);
+
+  const duplicateIsolation = nodeTestInvocationContract([
+    executable,
+    "--test-isolation=process",
+    "--test-isolation=none",
+    testFile,
+  ]);
+  assert.equal(duplicateIsolation.valid, false);
+  assert.deepEqual(duplicateIsolation.unmodeledOptions, ["--test-isolation"]);
+  assert.match(
+    validateExpectedProvenance({ invocation: { command: [
+      executable,
+      "--test-isolation=process",
+      "--test-isolation=none",
+      testFile,
+    ] } }, { invocationCommand: [executable, "--test", testFile] }).join("\n"),
+    /invocation contains unmodeled options: --test-isolation/,
+  );
 });
 
 test("captures a real Node test-worker invocation and validates its stable contract", async () => {
@@ -684,6 +735,21 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   });
 
   assert.equal(provenance.status, true);
+  const rejectedEnvironmentProvenance = await collectRunProvenance({
+    repoRoot,
+    electronExecutable,
+    electronPackageJson,
+    playwrightPackageJson,
+    baseRef: "feature/harbor-clo-159",
+    command: ["node", "--test", "e2e/converted-electron.test.mjs"],
+    environment: { NODE_OPTIONS: "--require=/tmp/loader.mjs" },
+    execFileFn: async (command, args) => ({
+      stdout: outputs.get([command, ...args].join(" ")) ?? "",
+    }),
+  });
+  assert.equal(rejectedEnvironmentProvenance.status, false);
+  assert.deepEqual(rejectedEnvironmentProvenance.invocation.environmentPolicy.rejectedNames, ["NODE_OPTIONS"]);
+  assert.ok(rejectedEnvironmentProvenance.errors.some((error) => /NODE_OPTIONS/.test(error)));
   assert.equal(provenance.baseSha, "51b7580ac26b670309425b78bafaa6ad80ed3fb5");
   assert.equal(provenance.headSha, "58901715f55799243bd0085c9c675665fcc38df4");
   assert.deepEqual(provenance.changedFiles, ["README.md", "e2e/launch-diagnostics.mjs"]);

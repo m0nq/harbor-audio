@@ -143,6 +143,9 @@ exact observed default values. Every other option—including loader, import,
 permission, policy, reporter, or changed generated-default options—is
 unmodeled and fails closed before Electron launch. This keeps the raw command
 available for review without silently accepting execution-affecting flags.
+Short option aliases, malformed boolean values, conflicting duplicate
+single-valued controls, and non-empty `NODE_OPTIONS` are also rejected before
+Electron launch; the inherited environment is otherwise preserved.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only

@@ -17,6 +17,7 @@ import {
   prepareIsolatedElectronProfile,
   recordProcessError,
   utf8Prefix,
+  validateNativeElectronEnvironment,
   validateExpectedProvenance,
   waitForPostCloseSettlement,
 } from "./launch-diagnostics.mjs";
@@ -80,6 +81,11 @@ function isolatedEnvironment() {
     "npm_config_electron_mirror",
   ]) {
     delete environment[key];
+  }
+
+  const rejectedNames = validateNativeElectronEnvironment(environment);
+  if (rejectedNames.length > 0) {
+    throw new Error(`Native Electron environment policy rejected: ${rejectedNames.join(", ")}`);
   }
 
   return environment;
@@ -154,13 +160,20 @@ async function withElectronLaunch(scenario, callback) {
       diagnostics.disposition = "HOLD";
       throw new Error("Native run provenance is incomplete; refusing Electron launch");
     }
+    const rejectedEnvironmentNames = validateNativeElectronEnvironment();
+    if (rejectedEnvironmentNames.length > 0) {
+      diagnostics.startupPhase = "environment-gate";
+      diagnostics.disposition = "HOLD";
+      throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
+    }
+    const electronEnvironment = isolatedEnvironment();
     diagnostics.startupPhase = "electron-launch";
     electronApp = await electron.launch({
       executablePath: electronExecutable,
       args: [`--user-data-dir=${userDataDir}`, repoRoot],
       artifactsDir,
       cwd: repoRoot,
-      env: isolatedEnvironment(),
+      env: electronEnvironment,
       timeout: timeoutMs,
     });
     diagnostics.startupPhase = "electron-started";

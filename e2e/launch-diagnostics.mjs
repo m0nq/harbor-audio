@@ -263,6 +263,20 @@ const NODE_TEST_MODELED_OPTIONS = new Set([
   "--experimental-test-module-mocks",
   "--test-force-exit",
 ]);
+const NODE_TEST_BOOLEAN_OPTIONS = new Set([
+  "--test",
+  "--test-only",
+  "--test-randomize",
+  "--watch",
+  "--watch-preserve-output",
+  "--experimental-test-module-mocks",
+  "--test-force-exit",
+]);
+const NODE_TEST_MULTI_VALUE_OPTIONS = new Set([
+  "--test-name-pattern",
+  "--test-skip-pattern",
+  "--watch-path",
+]);
 
 // These are the exact Node 26 worker defaults observed in the retained
 // provenance artifact. They are ignored only as generated defaults; any
@@ -298,12 +312,21 @@ const NODE_WORKER_GENERATED_DEFAULT_FLAGS = new Set([
   "--use-env-proxy",
 ]);
 
+export const NATIVE_ELECTRON_REJECTED_ENVIRONMENT_NAMES = ["NODE_OPTIONS"];
+
+export function validateNativeElectronEnvironment(environment = process.env) {
+  return NATIVE_ELECTRON_REJECTED_ENVIRONMENT_NAMES.filter((name) => {
+    const value = environment?.[name];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+}
+
 function parseInvocationTokens(tokens) {
   const options = [];
   const positionals = [];
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
-    if (!isNonEmptyString(token) || !token.startsWith("--")) {
+    if (!isNonEmptyString(token) || !token.startsWith("-")) {
       positionals.push(token);
       continue;
     }
@@ -324,15 +347,26 @@ function optionValues(options, name) {
   return options.filter((option) => option.name === name).map((option) => option.value);
 }
 
-function hasOption(options, name) {
-  return options.some((option) => option.name === name);
+function booleanOptionValue(options, name) {
+  const matches = options.filter((option) => option.name === name);
+  if (matches.length === 0) return false;
+  if (matches.length > 1) return undefined;
+  if (matches[0].value === true || matches[0].value === "true") return true;
+  if (matches[0].value === "false") return false;
+  return undefined;
 }
 
 function classifyInvocationOptions(options) {
   const generatedDefaultOptions = [];
   const unmodeledOptions = [];
+  const optionCounts = new Map();
+  for (const option of options) optionCounts.set(option.name, (optionCounts.get(option.name) ?? 0) + 1);
   for (const option of options) {
     if (NODE_TEST_MODELED_OPTIONS.has(option.name)) continue;
+    if (optionCounts.get(option.name) > 1) {
+      unmodeledOptions.push(option.name);
+      continue;
+    }
     if (NODE_WORKER_GENERATED_DEFAULT_FLAGS.has(option.name) && option.value === true) {
       generatedDefaultOptions.push(option.name);
       continue;
@@ -342,6 +376,17 @@ function classifyInvocationOptions(options) {
       continue;
     }
     unmodeledOptions.push(option.name);
+  }
+  for (const option of options) {
+    if (NODE_TEST_MODELED_OPTIONS.has(option.name)
+      && NODE_TEST_BOOLEAN_OPTIONS.has(option.name)
+      && booleanOptionValue(options, option.name) === undefined) {
+      unmodeledOptions.push(option.name);
+    }
+    if (option.name === "--test" && option.value !== true) unmodeledOptions.push(option.name);
+  }
+  for (const [name, count] of optionCounts) {
+    if (count > 1 && !NODE_TEST_MULTI_VALUE_OPTIONS.has(name)) unmodeledOptions.push(name);
   }
   return {
     generatedDefaultOptions: [...new Set(generatedDefaultOptions)],
@@ -371,26 +416,36 @@ export function nodeTestInvocationContract(command) {
   const testRandomSeeds = optionValues(options, "--test-random-seed");
   const watchPaths = optionValues(options, "--watch-path");
   const { generatedDefaultOptions, unmodeledOptions } = classifyInvocationOptions(options);
+  const testOnly = booleanOptionValue(options, "--test-only");
+  const testRandomize = booleanOptionValue(options, "--test-randomize");
+  const watch = booleanOptionValue(options, "--watch");
+  const watchPreserveOutput = booleanOptionValue(options, "--watch-preserve-output");
+  const moduleMocks = booleanOptionValue(options, "--experimental-test-module-mocks");
+  const forceExit = booleanOptionValue(options, "--test-force-exit");
+  if (testIsolation.length > 0 && experimentalTestIsolation.length > 0) {
+    unmodeledOptions.push("--experimental-test-isolation");
+  }
   return {
     valid: positionals.length > 0
       && positionals.every(isNonEmptyString)
+      && ![testOnly, testRandomize, watch, watchPreserveOutput, moduleMocks, forceExit].includes(undefined)
       && unmodeledOptions.length === 0,
     executable: command[0],
     testFiles: positionals,
     testNamePatterns,
     testSkipPatterns,
     testIsolation: testIsolation[0] ?? experimentalTestIsolation[0] ?? "process",
-    testOnly: hasOption(options, "--test-only"),
+    testOnly,
     testShard: testShards[0] ?? null,
     testGlobalSetup: testGlobalSetups[0] ?? null,
     testRerunFailures: testRerunFailures[0] ?? null,
-    testRandomize: hasOption(options, "--test-randomize"),
+    testRandomize,
     testRandomSeed: testRandomSeeds[0] ?? null,
-    watch: hasOption(options, "--watch") || watchPaths.length > 0,
+    watch: watch || watchPaths.length > 0,
     watchPaths,
-    watchPreserveOutput: hasOption(options, "--watch-preserve-output"),
-    moduleMocks: hasOption(options, "--experimental-test-module-mocks"),
-    forceExit: hasOption(options, "--test-force-exit"),
+    watchPreserveOutput,
+    moduleMocks,
+    forceExit,
     generatedDefaultOptions,
     unmodeledOptions,
   };
@@ -625,10 +680,13 @@ export async function collectRunProvenance({
   playwrightPackageJson,
   baseRef,
   command = currentInvocationCommand(),
+  environment = process.env,
   execFileFn = execFile,
   readFileFn = defaultReadFile,
 } = {}) {
   const errors = [];
+  const rejectedEnvironmentNames = validateNativeElectronEnvironment(environment);
+  errors.push(...rejectedEnvironmentNames.map((name) => `native Electron environment ${name} must be unset before launch`));
   const commands = [];
   const commandResult = async (commandName, args, { details = false } = {}) => {
     const result = await runCommand(commandName, args, repoRoot, execFileFn);
@@ -642,8 +700,8 @@ export async function collectRunProvenance({
     return details ? result : result.value;
   };
   const resolvedBaseRef = baseRef
-    ?? process.env.HARBOR_NATIVE_BASE_REF
-    ?? (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
+    ?? environment.HARBOR_NATIVE_BASE_REF
+    ?? (environment.GITHUB_BASE_REF ? `origin/${environment.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
   const headSha = await commandResult("git", ["rev-parse", "HEAD"]);
   const baseSha = await commandResult("git", ["rev-parse", "--verify", `${resolvedBaseRef}^{commit}`]);
   const changedFilesResult = baseSha
@@ -737,10 +795,13 @@ export async function collectRunProvenance({
     invocation: {
       command,
       contract: invocationContract,
-      context: process.env.NODE_TEST_CONTEXT?.startsWith("child") ? "node-test-worker" : "main-process",
-      contextValue: process.env.NODE_TEST_CONTEXT,
+      context: environment.NODE_TEST_CONTEXT?.startsWith("child") ? "node-test-worker" : "main-process",
+      contextValue: environment.NODE_TEST_CONTEXT,
       cwd: process.cwd(),
       nodeExecutable: process.execPath,
+      environmentPolicy: {
+        rejectedNames: rejectedEnvironmentNames,
+      },
       electronOverridesRemoved: [
         "ELECTRON_CACHE",
         "ELECTRON_MIRROR",
