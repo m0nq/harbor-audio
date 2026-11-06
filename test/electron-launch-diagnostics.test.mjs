@@ -239,9 +239,12 @@ test("matches the operator test command to a Node worker contract without compar
   ];
 
   assert.notDeepEqual(workerCommand, operatorCommand);
+  const workerContract = nodeTestInvocationContract(workerCommand);
+  assert.deepEqual(workerContract.unmodeledOptions, []);
+  assert.ok(workerContract.generatedDefaultOptions.includes("--node-snapshot"));
   assert.deepEqual(
     validateExpectedProvenance(
-      { invocation: { command: workerCommand, contract: nodeTestInvocationContract(workerCommand) } },
+      { invocation: { command: workerCommand, contract: workerContract } },
       { invocationCommand: operatorCommand },
     ),
     [],
@@ -281,6 +284,55 @@ test("matches the operator test command to a Node worker contract without compar
     ).join("\n"),
     /invocation testFiles expected/,
   );
+  const unmodeled = [nodeExecutable, "--require=/tmp/loader.mjs", ...workerCommand.slice(1)];
+  const unmodeledContract = nodeTestInvocationContract(unmodeled);
+  assert.deepEqual(unmodeledContract.unmodeledOptions, ["--require"]);
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: unmodeled, contract: unmodeledContract } },
+      { invocationCommand: operatorCommand },
+    ).join("\n"),
+    /invocation contains unmodeled options: --require/,
+  );
+});
+
+test("compares every modeled Node test control while rejecting changed values", () => {
+  const nodeExecutable = "/opt/homebrew/Cellar/node/26.13.0_2/bin/node";
+  const testFile = "/approved/worktree/e2e/converted-electron.test.mjs";
+  const controls = [
+    ["--test-skip-pattern=skip", "--test-skip-pattern=changed", /testSkipPatterns/],
+    ["--test-shard=1/2", "--test-shard=2/2", /testShard/],
+    ["--test-global-setup=/approved/setup.mjs", "--test-global-setup=/wrong/setup.mjs", /testGlobalSetup/],
+    ["--test-rerun-failures=2", "--test-rerun-failures=3", /testRerunFailures/],
+    ["--test-randomize", "", /testRandomize/],
+    ["--test-random-seed=42", "--test-random-seed=43", /testRandomSeed/],
+    ["--test-only", "", /testOnly/],
+    ["--watch-path=/approved/watch", "--watch-path=/wrong/watch", /watchPaths/],
+    ["--watch-preserve-output", "", /watchPreserveOutput/],
+    ["--experimental-test-module-mocks", "", /moduleMocks/],
+    ["--test-force-exit", "", /forceExit/],
+  ];
+  const operatorControls = controls.map(([positive]) => positive).filter(Boolean);
+  const operatorCommand = [nodeExecutable, "--test", ...operatorControls, testFile];
+  const workerCommand = [nodeExecutable, ...operatorControls, testFile];
+
+  assert.deepEqual(validateExpectedProvenance(
+    { invocation: { command: workerCommand } },
+    { invocationCommand: operatorCommand },
+  ), []);
+
+  for (const [index, [, changed, mismatchPattern]] of controls.entries()) {
+    const changedControls = operatorControls.slice();
+    const control = controls[index][0];
+    const controlIndex = changedControls.indexOf(control);
+    if (changed) changedControls[controlIndex] = changed;
+    else changedControls.splice(controlIndex, 1);
+    const mismatches = validateExpectedProvenance(
+      { invocation: { command: [nodeExecutable, ...changedControls, testFile] } },
+      { invocationCommand: operatorCommand },
+    );
+    assert.match(mismatches.join("\n"), mismatchPattern);
+  }
 });
 
 test("captures a real Node test-worker invocation and validates its stable contract", async () => {
@@ -320,6 +372,8 @@ test("captures a real Node test-worker invocation and validates its stable contr
     assert.deepEqual(report.contract.testFiles, [testFile]);
     assert.deepEqual(report.contract.testNamePatterns, ["worker contract"]);
     assert.equal(report.contract.testIsolation, "process");
+    assert.deepEqual(report.contract.unmodeledOptions, []);
+    assert.ok(report.contract.generatedDefaultOptions.includes("--node-snapshot"));
     assert.deepEqual(
       validateExpectedProvenance(
         { invocation: report },

@@ -245,6 +245,59 @@ const NODE_TEST_VALUE_OPTIONS = new Set([
   "--watch-path",
 ]);
 
+const NODE_TEST_MODELED_OPTIONS = new Set([
+  "--test",
+  "--test-name-pattern",
+  "--test-skip-pattern",
+  "--test-isolation",
+  "--experimental-test-isolation",
+  "--test-shard",
+  "--test-global-setup",
+  "--test-rerun-failures",
+  "--test-random-seed",
+  "--watch-path",
+  "--test-only",
+  "--test-randomize",
+  "--watch",
+  "--watch-preserve-output",
+  "--experimental-test-module-mocks",
+  "--test-force-exit",
+]);
+
+// These are the exact Node 26 worker defaults observed in the retained
+// provenance artifact. They are ignored only as generated defaults; any
+// changed value is unmodeled and fails closed so an execution-affecting flag
+// cannot be silently accepted.
+const NODE_WORKER_GENERATED_DEFAULT_VALUES = new Map([
+  ["--heap-prof-interval", "524288"],
+  ["--watch-kill-signal", "SIGTERM"],
+  ["--inspect-publish-uid", "stderr,http"],
+  ["--test-timeout", "0"],
+  ["--test-concurrency", "0"],
+  ["--max-http-header-size", "16384"],
+  ["--stack-trace-limit", "10"],
+  ["--test-coverage-lines", "0"],
+  ["--inspect-port", "127.0.0.1:9229"],
+  ["--heapsnapshot-near-heap-limit", "0"],
+  ["--test-coverage-functions", "0"],
+  ["--test-coverage-branches", "0"],
+  ["--cpu-prof-interval", "1000"],
+  ["--report-signal", "SIGUSR2"],
+  ["--use-largepages", "off"],
+  ["--network-family-autoselection-attempt-timeout", "500"],
+  ["--secure-heap-min", "2"],
+  ["--v8-pool-size", "4"],
+  ["--secure-heap", "0"],
+  ["--tls-cipher-list", "TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256:TLS_AES_128_GCM_SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES256-GCM-SHA384:DHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-SHA256:DHE-RSA-AES128-SHA256:ECDHE-RSA-AES256-SHA384:DHE-RSA-AES256-SHA384:ECDHE-RSA-AES256-SHA256:DHE-RSA-AES256-SHA256:HIGH:!aNULL:!eNULL:!EXPORT:!DES:!RC4:!MD5:!PSK:!SRP:!CAMELLIA"],
+  ["--trace-event-file-pattern", "node_trace.${rotation}.log"],
+]);
+
+const NODE_WORKER_GENERATED_DEFAULT_FLAGS = new Set([
+  "--experimental-addon-modules",
+  "--node-snapshot",
+  "--use-env-proxy",
+]);
+
 function parseInvocationTokens(tokens) {
   const options = [];
   const positionals = [];
@@ -275,6 +328,27 @@ function hasOption(options, name) {
   return options.some((option) => option.name === name);
 }
 
+function classifyInvocationOptions(options) {
+  const generatedDefaultOptions = [];
+  const unmodeledOptions = [];
+  for (const option of options) {
+    if (NODE_TEST_MODELED_OPTIONS.has(option.name)) continue;
+    if (NODE_WORKER_GENERATED_DEFAULT_FLAGS.has(option.name) && option.value === true) {
+      generatedDefaultOptions.push(option.name);
+      continue;
+    }
+    if (NODE_WORKER_GENERATED_DEFAULT_VALUES.get(option.name) === option.value) {
+      generatedDefaultOptions.push(option.name);
+      continue;
+    }
+    unmodeledOptions.push(option.name);
+  }
+  return {
+    generatedDefaultOptions: [...new Set(generatedDefaultOptions)],
+    unmodeledOptions: [...new Set(unmodeledOptions)],
+  };
+}
+
 /**
  * Describes the stable Node test-runner contract shared by the operator's
  * command and an isolated test worker. The raw command remains evidence, but
@@ -296,8 +370,11 @@ export function nodeTestInvocationContract(command) {
   const testRerunFailures = optionValues(options, "--test-rerun-failures");
   const testRandomSeeds = optionValues(options, "--test-random-seed");
   const watchPaths = optionValues(options, "--watch-path");
+  const { generatedDefaultOptions, unmodeledOptions } = classifyInvocationOptions(options);
   return {
-    valid: positionals.length > 0 && positionals.every(isNonEmptyString),
+    valid: positionals.length > 0
+      && positionals.every(isNonEmptyString)
+      && unmodeledOptions.length === 0,
     executable: command[0],
     testFiles: positionals,
     testNamePatterns,
@@ -314,11 +391,16 @@ export function nodeTestInvocationContract(command) {
     watchPreserveOutput: hasOption(options, "--watch-preserve-output"),
     moduleMocks: hasOption(options, "--experimental-test-module-mocks"),
     forceExit: hasOption(options, "--test-force-exit"),
+    generatedDefaultOptions,
+    unmodeledOptions,
   };
 }
 
 function compareInvocationContracts(actual, expected) {
   const mismatches = [];
+  if (actual?.unmodeledOptions?.length > 0) {
+    mismatches.push(`invocation contains unmodeled options: ${actual.unmodeledOptions.join(", ")}`);
+  }
   if (!actual?.valid || !expected?.valid) {
     mismatches.push("invocation contract is missing or malformed");
     return mismatches;

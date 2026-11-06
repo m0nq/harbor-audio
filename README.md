@@ -137,8 +137,12 @@ Node's isolated test worker may add runtime defaults to `process.execArgv`; the
 harness retains that raw worker invocation for diagnostics but validates the
 stable contract separately: executable, test files, selection patterns,
 isolation, watch/shard controls, setup and rerun controls, and test-only or
-module-mock behavior. It does not compare generated heap, inspector, coverage,
-or other machine-specific defaults byte-for-byte.
+module-mock behavior. It does not compare the known Node 26 worker-generated
+defaults byte-for-byte, but records their option names and accepts only the
+exact observed default values. Every other option—including loader, import,
+permission, policy, reporter, or changed generated-default options—is
+unmodeled and fails closed before Electron launch. This keeps the raw command
+available for review without silently accepting execution-affecting flags.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only
