@@ -240,7 +240,7 @@ test("matches the operator test command to a Node worker contract without compar
   ];
 
   assert.notDeepEqual(workerCommand, operatorCommand);
-  const workerContract = nodeTestInvocationContract(workerCommand);
+  const workerContract = nodeTestInvocationContract(workerCommand, { context: "node-test-worker" });
   assert.deepEqual(workerContract.unmodeledOptions, []);
   assert.ok(workerContract.generatedDefaultOptions.includes("--node-snapshot"));
   assert.deepEqual(
@@ -252,14 +252,14 @@ test("matches the operator test command to a Node worker contract without compar
   );
   assert.match(
     validateExpectedProvenance(
-      { invocation: { command: [nodeExecutable, ...workerCommand.slice(1).map((argument) => argument === "--test-isolation=process" ? "--test-isolation=none" : argument)] } },
+      { invocation: { command: [nodeExecutable, ...workerCommand.slice(1).map((argument) => argument === "--test-isolation=process" ? "--test-isolation=none" : argument)], context: "node-test-worker" } },
       { invocationCommand: operatorCommand },
     ).join("\n"),
     /invocation testIsolation expected "process" but was "none"/,
   );
   assert.match(
     validateExpectedProvenance(
-      { invocation: { command: [nodeExecutable, "--watch", ...workerCommand.slice(1)] } },
+      { invocation: { command: [nodeExecutable, "--watch", ...workerCommand.slice(1)], context: "node-test-worker" } },
       { invocationCommand: operatorCommand },
     ).join("\n"),
     /invocation watch expected false but was true/,
@@ -286,7 +286,7 @@ test("matches the operator test command to a Node worker contract without compar
     /invocation testFiles expected/,
   );
   const unmodeled = [nodeExecutable, "--require=/tmp/loader.mjs", ...workerCommand.slice(1)];
-  const unmodeledContract = nodeTestInvocationContract(unmodeled);
+  const unmodeledContract = nodeTestInvocationContract(unmodeled, { context: "node-test-worker" });
   assert.deepEqual(unmodeledContract.unmodeledOptions, ["--require"]);
   assert.match(
     validateExpectedProvenance(
@@ -318,7 +318,7 @@ test("compares every modeled Node test control while rejecting changed values", 
   const workerCommand = [nodeExecutable, ...operatorControls, testFile];
 
   assert.deepEqual(validateExpectedProvenance(
-    { invocation: { command: workerCommand } },
+    { invocation: { command: workerCommand, context: "node-test-worker" } },
     { invocationCommand: operatorCommand },
   ), []);
 
@@ -329,7 +329,7 @@ test("compares every modeled Node test control while rejecting changed values", 
     if (changed) changedControls[controlIndex] = changed;
     else changedControls.splice(controlIndex, 1);
     const mismatches = validateExpectedProvenance(
-      { invocation: { command: [nodeExecutable, ...changedControls, testFile] } },
+      { invocation: { command: [nodeExecutable, ...changedControls, testFile], context: "node-test-worker" } },
       { invocationCommand: operatorCommand },
     );
     assert.match(mismatches.join("\n"), mismatchPattern);
@@ -344,6 +344,26 @@ test("fails closed for environment and strict Node option provenance", () => {
   const executable = "/opt/homebrew/bin/node";
   const testFile = "/approved/worktree/e2e/converted-electron.test.mjs";
   const expected = [executable, "--test", "--test-only", testFile];
+
+  const scriptContract = nodeTestInvocationContract([executable, testFile], { context: "main-process" });
+  assert.equal(scriptContract.testRunnerMode, "script");
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: [executable, testFile], contract: scriptContract } },
+      { invocationCommand: expected },
+    ).join("\n"),
+    /invocation testRunnerMode expected "test-runner" but was "script"/,
+  );
+
+  const workerModeContract = nodeTestInvocationContract([executable, testFile], { context: "node-test-worker" });
+  assert.equal(workerModeContract.testRunnerMode, "test-worker");
+  assert.deepEqual(
+    validateExpectedProvenance(
+      { invocation: { command: [executable, testFile], contract: workerModeContract } },
+      { invocationCommand: [executable, "--test", testFile] },
+    ),
+    [],
+  );
 
   const shortLoader = nodeTestInvocationContract([executable, "-r", "/tmp/loader.mjs", testFile]);
   assert.equal(shortLoader.valid, false);
@@ -748,6 +768,7 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   });
 
   assert.equal(provenance.status, true);
+  let rejectedPreflightCalls = 0;
   const rejectedEnvironmentProvenance = await collectRunProvenance({
     repoRoot,
     electronExecutable,
@@ -756,11 +777,16 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
     baseRef: "feature/harbor-clo-159",
     command: ["node", "--test", "e2e/converted-electron.test.mjs"],
     environment: { NODE_OPTIONS: "--require=/tmp/loader.mjs" },
-    execFileFn: async (command, args) => ({
-      stdout: outputs.get([command, ...args].join(" ")) ?? "",
-    }),
+    execFileFn: async (command, args) => {
+      rejectedPreflightCalls += 1;
+      return {
+        stdout: outputs.get([command, ...args].join(" ")) ?? "",
+      };
+    },
   });
   assert.equal(rejectedEnvironmentProvenance.status, false);
+  assert.equal(rejectedPreflightCalls, 0);
+  assert.deepEqual(rejectedEnvironmentProvenance.commands, []);
   assert.deepEqual(rejectedEnvironmentProvenance.invocation.environmentPolicy.rejectedNames, ["NODE_OPTIONS"]);
   assert.ok(rejectedEnvironmentProvenance.errors.some((error) => /NODE_OPTIONS/.test(error)));
   assert.equal(provenance.baseSha, "51b7580ac26b670309425b78bafaa6ad80ed3fb5");

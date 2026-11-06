@@ -416,12 +416,15 @@ function classifyInvocationOptions(options) {
  * Node-generated worker defaults are intentionally not treated as operator
  * intent or compared byte-for-byte.
  */
-export function nodeTestInvocationContract(command) {
+export function nodeTestInvocationContract(command, { context } = {}) {
   if (!Array.isArray(command) || command.length < 2 || !isNonEmptyString(command[0])) {
     return { valid: false };
   }
 
   const { options, positionals } = parseInvocationTokens(command.slice(1));
+  const isNodeTestWorker = context === "node-test-worker"
+    || (context === undefined && process.env.NODE_TEST_CONTEXT?.startsWith("child"));
+  const hasTestFlag = options.some((option) => option.name === "--test" && option.value === true);
   const testIsolation = optionValues(options, "--test-isolation");
   const experimentalTestIsolation = optionValues(options, "--experimental-test-isolation");
   const testNamePatterns = optionValues(options, "--test-name-pattern");
@@ -447,6 +450,7 @@ export function nodeTestInvocationContract(command) {
       && ![testOnly, testRandomize, watch, watchPreserveOutput, moduleMocks, forceExit].includes(undefined)
       && unmodeledOptions.length === 0,
     executable: command[0],
+    testRunnerMode: hasTestFlag ? "test-runner" : isNodeTestWorker ? "test-worker" : "script",
     testFiles: positionals,
     testNamePatterns,
     testSkipPatterns,
@@ -480,6 +484,7 @@ function compareInvocationContracts(actual, expected) {
   for (const field of [
     "executable",
     "testFiles",
+    "testRunnerMode",
     "testNamePatterns",
     "testSkipPatterns",
     "testIsolation",
@@ -495,7 +500,10 @@ function compareInvocationContracts(actual, expected) {
     "moduleMocks",
     "forceExit",
   ]) {
-    if (JSON.stringify(actual[field]) !== JSON.stringify(expected[field])) {
+    const workerEquivalent = field === "testRunnerMode"
+      && expected[field] === "test-runner"
+      && actual[field] === "test-worker";
+    if (!workerEquivalent && JSON.stringify(actual[field]) !== JSON.stringify(expected[field])) {
       mismatches.push(`invocation ${field} expected ${JSON.stringify(expected[field])} but was ${JSON.stringify(actual[field])}`);
     }
   }
@@ -601,9 +609,11 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
     if (!Array.isArray(expectations.invocationCommand)) {
       mismatches.push("invocation command expectation is invalid");
     } else {
-      const expectedInvocation = nodeTestInvocationContract(expectations.invocationCommand);
+      const expectedInvocation = nodeTestInvocationContract(expectations.invocationCommand, { context: "main-process" });
       const actualInvocation = provenance?.invocation?.contract
-        ?? nodeTestInvocationContract(provenance?.invocation?.command);
+        ?? nodeTestInvocationContract(provenance?.invocation?.command, {
+          context: provenance?.invocation?.context,
+        });
       const invocationMismatches = compareInvocationContracts(actualInvocation, expectedInvocation);
       if (invocationMismatches.length > 0) {
         mismatches.push(`invocation command expected contract ${JSON.stringify(expectedInvocation)} but was ${JSON.stringify(actualInvocation)}: ${invocationMismatches.join("; ")}`);
@@ -700,9 +710,50 @@ export async function collectRunProvenance({
   execFileFn = execFile,
   readFileFn = defaultReadFile,
 } = {}) {
-  const errors = [];
+  const resolvedBaseRef = baseRef
+    ?? environment.HARBOR_NATIVE_BASE_REF
+    ?? (environment.GITHUB_BASE_REF ? `origin/${environment.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
+  const invocationContext = environment.NODE_TEST_CONTEXT?.startsWith("child")
+    ? "node-test-worker"
+    : "main-process";
+  const invocationContract = nodeTestInvocationContract(command, { context: invocationContext });
   const rejectedEnvironmentNames = validateNativeElectronEnvironment(environment);
-  errors.push(...rejectedEnvironmentNames.map((name) => `native Electron environment ${name} must be unset before launch`));
+  if (rejectedEnvironmentNames.length > 0) {
+    return {
+      status: false,
+      worktree: repoRoot,
+      baseRef: resolvedBaseRef,
+      baseSha: undefined,
+      headSha: undefined,
+      changedFiles: undefined,
+      repositoryStatus: "",
+      invocation: {
+        command,
+        contract: invocationContract,
+        context: invocationContext,
+        contextValue: environment.NODE_TEST_CONTEXT,
+        cwd: process.cwd(),
+        nodeExecutable: process.execPath,
+        environmentPolicy: { rejectedNames: rejectedEnvironmentNames },
+        electronOverridesRemoved: [
+          "ELECTRON_CACHE",
+          "ELECTRON_MIRROR",
+          "ELECTRON_OVERRIDE_DIST_PATH",
+          "ELECTRON_RUN_AS_NODE",
+          "NPM_CONFIG_ELECTRON_MIRROR",
+          "npm_config_electron_mirror",
+        ],
+      },
+      commands: [],
+      toolchain: { node: process.version },
+      artifact: {
+        executable: electronExecutable,
+        helperExecutables: electronHelperExecutables,
+      },
+      errors: rejectedEnvironmentNames.map((name) => `native Electron environment ${name} must be unset before launch`),
+    };
+  }
+  const errors = [];
   const commands = [];
   const commandResult = async (commandName, args, { details = false } = {}) => {
     const result = await runCommand(commandName, args, repoRoot, execFileFn);
@@ -715,9 +766,6 @@ export async function collectRunProvenance({
     if (result.error) errors.push(result.error);
     return details ? result : result.value;
   };
-  const resolvedBaseRef = baseRef
-    ?? environment.HARBOR_NATIVE_BASE_REF
-    ?? (environment.GITHUB_BASE_REF ? `origin/${environment.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
   const headSha = await commandResult("git", ["rev-parse", "HEAD"]);
   const baseSha = await commandResult("git", ["rev-parse", "--verify", `${resolvedBaseRef}^{commit}`]);
   const changedFilesResult = baseSha
@@ -770,7 +818,6 @@ export async function collectRunProvenance({
   const changedFiles = changedFilesText === undefined
     ? undefined
     : changedFilesText.split("\n").filter(Boolean);
-  const invocationContract = nodeTestInvocationContract(command);
   const required = [
     ["head SHA", () => isSha(headSha, 40)],
     ["base SHA", () => isSha(baseSha, 40)],
@@ -811,7 +858,7 @@ export async function collectRunProvenance({
     invocation: {
       command,
       contract: invocationContract,
-      context: environment.NODE_TEST_CONTEXT?.startsWith("child") ? "node-test-worker" : "main-process",
+      context: invocationContext,
       contextValue: environment.NODE_TEST_CONTEXT,
       cwd: process.cwd(),
       nodeExecutable: process.execPath,
