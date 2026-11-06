@@ -11,6 +11,7 @@ import {
   MAX_CAPTURED_STREAM_BYTES,
   sanitizeDiagnosticsText,
   utf8Prefix,
+  validateNativeElectronEnvironment,
   validateExpectedProvenance,
   waitForPostCloseSettlement,
 } from "./launch-diagnostics.mjs";
@@ -141,6 +142,10 @@ export async function resolveElectronHelperExecutables(
 }
 
 export function buildProbeEnvironment(baseEnvironment = process.env) {
+  const rejectedNames = validateNativeElectronEnvironment(baseEnvironment);
+  if (rejectedNames.length > 0) {
+    throw new Error(`Native Electron environment policy rejected: ${rejectedNames.join(", ")}`);
+  }
   const environment = Object.fromEntries(
     Object.entries(baseEnvironment).filter(([, value]) => value !== undefined),
   );
@@ -697,6 +702,7 @@ export async function runVersionProbe({
   timeoutMs = VERSION_PROBE_TIMEOUT_MS,
   graceMs = VERSION_PROBE_TERMINATION_GRACE_MS,
   spawnFn = defaultSpawn,
+  environment = process.env,
   execFileFn = execFile,
   killFn = (pid, signal) => process.kill(pid, signal),
   supervisorPid = process.pid,
@@ -741,6 +747,10 @@ export async function runVersionProbe({
     if (provenance.toolchain?.electron !== expectedVersion) {
       throw new Error(`Electron package version is not ${expectedVersion}`);
     }
+    const rejectedEnvironmentNames = validateNativeElectronEnvironment(environment);
+    if (rejectedEnvironmentNames.length > 0) {
+      throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
+    }
     const provenanceMismatches = validateExpectedProvenance(provenance, expectedProvenance);
     if (provenanceMismatches.length > 0) {
       throw new Error(`exact native provenance mismatch: ${provenanceMismatches.join("; ")}`);
@@ -755,7 +765,7 @@ export async function runVersionProbe({
   try {
     child = spawnFn(electronExecutable, ["--version"], {
       cwd: repoRoot,
-      env: buildProbeEnvironment(),
+      env: buildProbeEnvironment(environment),
       shell: false,
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],

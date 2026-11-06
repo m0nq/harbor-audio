@@ -324,10 +324,12 @@ export function validateNativeElectronEnvironment(environment = process.env) {
 function parseInvocationTokens(tokens) {
   const options = [];
   const positionals = [];
+  let sawPositional = false;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index];
     if (!isNonEmptyString(token) || !token.startsWith("-")) {
       positionals.push(token);
+      sawPositional = true;
       continue;
     }
 
@@ -335,10 +337,15 @@ function parseInvocationTokens(tokens) {
     const name = separator === -1 ? token : token.slice(0, separator);
     let value = separator === -1 ? true : token.slice(separator + 1);
     if (separator === -1 && NODE_TEST_VALUE_OPTIONS.has(name) && index + 1 < tokens.length) {
-      value = tokens[index + 1];
-      index += 1;
+      const candidate = tokens[index + 1];
+      if (isNonEmptyString(candidate) && !candidate.startsWith("-")) {
+        value = candidate;
+        index += 1;
+      } else {
+        value = undefined;
+      }
     }
-    options.push({ name, value });
+    options.push({ name, value, afterPositional: sawPositional });
   }
   return { options, positionals };
 }
@@ -362,7 +369,16 @@ function classifyInvocationOptions(options) {
   const optionCounts = new Map();
   for (const option of options) optionCounts.set(option.name, (optionCounts.get(option.name) ?? 0) + 1);
   for (const option of options) {
-    if (NODE_TEST_MODELED_OPTIONS.has(option.name)) continue;
+    if (option.afterPositional) {
+      unmodeledOptions.push(option.name);
+      continue;
+    }
+    if (NODE_TEST_MODELED_OPTIONS.has(option.name)) {
+      if (NODE_TEST_VALUE_OPTIONS.has(option.name) && !isNonEmptyString(option.value)) {
+        unmodeledOptions.push(option.name);
+      }
+      continue;
+    }
     if (optionCounts.get(option.name) > 1) {
       unmodeledOptions.push(option.name);
       continue;

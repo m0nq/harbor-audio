@@ -367,6 +367,19 @@ test("fails closed for environment and strict Node option provenance", () => {
   assert.equal(malformedTestMode.valid, false);
   assert.deepEqual(malformedTestMode.unmodeledOptions, ["--test"]);
 
+  const missingPatternValue = nodeTestInvocationContract([executable, testFile, "--test-name-pattern"]);
+  assert.equal(missingPatternValue.valid, false);
+  assert.deepEqual(missingPatternValue.unmodeledOptions, ["--test-name-pattern"]);
+
+  const maskedPatternValue = nodeTestInvocationContract([
+    executable,
+    "--test-name-pattern",
+    "--require=/tmp/loader.mjs",
+    testFile,
+  ]);
+  assert.equal(maskedPatternValue.valid, false);
+  assert.deepEqual(maskedPatternValue.unmodeledOptions, ["--test-name-pattern", "--require"]);
+
   const duplicateIsolation = nodeTestInvocationContract([
     executable,
     "--test-isolation=process",

@@ -86,6 +86,10 @@ test("removes only Electron override variables from the inherited environment", 
   });
 
   assert.deepEqual(environment, { PATH: "/usr/bin", TMPDIR: "/tmp/" });
+  assert.throws(
+    () => buildProbeEnvironment({ NODE_OPTIONS: "--require=/tmp/loader.mjs" }),
+    /Native Electron environment policy rejected: NODE_OPTIONS/,
+  );
 });
 
 test("parses process ownership records and descendants without using a process group", () => {
@@ -111,6 +115,33 @@ test("validates a private mode-700 run root", async () => {
   } finally {
     await rm(runRoot, { recursive: true, force: true });
   }
+});
+
+test("rejects NODE_OPTIONS before the native version probe spawn", async () => {
+  let spawnCalled = false;
+  const result = await runVersionProbe({
+    repoRoot: "/repo",
+    electronExecutable: "/opt/Electron",
+    provenance: { status: true, toolchain: { electron: "44.7.0" } },
+    runRoot: "/private/run-root",
+    supervisorPid: 100,
+    environment: { NODE_OPTIONS: "--require=/tmp/loader.mjs" },
+    spawnFn: () => {
+      spawnCalled = true;
+      throw new Error("spawn must not be reached");
+    },
+    execFileFn: fakeExecFile({
+      supervisorPid: 100,
+      childPid: 4242,
+      executable: "/opt/Electron",
+      childAlive: false,
+    }),
+    validateRunRootFn: async () => "/private/run-root",
+  });
+
+  assert.equal(spawnCalled, false);
+  assert.equal(result.outcome, "HOLD");
+  assert.match(result.errors.join("\n"), /NODE_OPTIONS/);
 });
 
 test("resolves the pinned Electron helper executable paths", async () => {
