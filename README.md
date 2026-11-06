@@ -145,12 +145,14 @@ unmodeled and fails closed before Electron launch. This keeps the raw command
 available for review without silently accepting execution-affecting flags.
 Short option aliases, malformed boolean values, conflicting duplicate
 single-valued controls, and non-empty `NODE_OPTIONS` are also rejected before
-Electron launch; the inherited environment is otherwise preserved. The
-contract records `test-runner`, verified `test-worker`, and ordinary `script`
-mode separately: a GUI expectation requires `--test`, while the worker may
-omit it only when its recorded context is `node-test-worker`. A rejected
-environment stops provenance collection before any preflight subprocess is
-started.
+Electron launch; the inherited environment is otherwise preserved. Generated
+defaults are accepted only for a worker whose `NODE_TEST_CONTEXT` marker and
+direct parent command independently verify a Node `--test` runner; the marker
+alone is not trusted. The contract records `test-runner`, verified
+`test-worker`, ordinary `script`, and unverified context separately: a GUI
+expectation requires `--test`, while the worker may omit it only after that
+parent-process verification. A rejected environment stops provenance
+collection before any preflight subprocess is started.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only

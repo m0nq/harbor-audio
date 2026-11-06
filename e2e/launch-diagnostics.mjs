@@ -139,6 +139,84 @@ async function runCommand(command, args, cwd, execFileFn) {
   }
 }
 
+function matchesCommandExecutable(command, executable) {
+  return command === executable
+    || command.startsWith(`${executable} `)
+    || command.startsWith(`"${executable}" `);
+}
+
+function isNodeTestRunnerCommand(command, executable) {
+  return isNonEmptyString(command)
+    && matchesCommandExecutable(command, executable)
+    && /(?:^|\s)--test(?:=true)?(?:\s|$)/.test(command);
+}
+
+/**
+ * Verifies a Node test-worker marker against the independently observed
+ * direct parent command. An inherited NODE_TEST_CONTEXT value alone is not
+ * trusted because an ordinary script can set it before launch.
+ */
+export async function resolveNodeTestWorkerContext({
+  environment = process.env,
+  execFileFn = execFile,
+  parentPid = process.ppid,
+  nodeExecutable = process.execPath,
+  cwd = process.cwd(),
+} = {}) {
+  const contextValue = environment?.NODE_TEST_CONTEXT;
+  const markerLooksLikeWorker = typeof contextValue === "string"
+    && contextValue.startsWith("child");
+  if (!markerLooksLikeWorker) {
+    return {
+      context: "main-process",
+      verified: false,
+      contextValue,
+      parentPid,
+    };
+  }
+
+  const command = ["/bin/ps", "-p", String(parentPid), "-o", "command="];
+  if (!Number.isInteger(parentPid) || parentPid <= 0) {
+    return {
+      context: "unverified",
+      verified: false,
+      contextValue,
+      parentPid,
+      command,
+      error: "Node test worker parent PID could not be established",
+    };
+  }
+
+  const result = await runCommand(command[0], command.slice(1), cwd, execFileFn);
+  if (result.error) {
+    return {
+      context: "unverified",
+      verified: false,
+      contextValue,
+      parentPid,
+      command,
+      error: `Node test worker parent verification failed: ${result.error}`,
+    };
+  }
+  if (!isNodeTestRunnerCommand(result.value, nodeExecutable)) {
+    return {
+      context: "unverified",
+      verified: false,
+      contextValue,
+      parentPid,
+      command,
+      error: "Node test worker parent is not an independently verified Node test runner",
+    };
+  }
+  return {
+    context: "node-test-worker",
+    verified: true,
+    contextValue,
+    parentPid,
+    command,
+  };
+}
+
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
 }
@@ -363,7 +441,7 @@ function booleanOptionValue(options, name) {
   return undefined;
 }
 
-function classifyInvocationOptions(options) {
+function classifyInvocationOptions(options, { allowGeneratedDefaults = false } = {}) {
   const generatedDefaultOptions = [];
   const unmodeledOptions = [];
   const optionCounts = new Map();
@@ -383,11 +461,11 @@ function classifyInvocationOptions(options) {
       unmodeledOptions.push(option.name);
       continue;
     }
-    if (NODE_WORKER_GENERATED_DEFAULT_FLAGS.has(option.name) && option.value === true) {
+    if (allowGeneratedDefaults && NODE_WORKER_GENERATED_DEFAULT_FLAGS.has(option.name) && option.value === true) {
       generatedDefaultOptions.push(option.name);
       continue;
     }
-    if (NODE_WORKER_GENERATED_DEFAULT_VALUES.get(option.name) === option.value) {
+    if (allowGeneratedDefaults && NODE_WORKER_GENERATED_DEFAULT_VALUES.get(option.name) === option.value) {
       generatedDefaultOptions.push(option.name);
       continue;
     }
@@ -422,8 +500,7 @@ export function nodeTestInvocationContract(command, { context } = {}) {
   }
 
   const { options, positionals } = parseInvocationTokens(command.slice(1));
-  const isNodeTestWorker = context === "node-test-worker"
-    || (context === undefined && process.env.NODE_TEST_CONTEXT?.startsWith("child"));
+  const isNodeTestWorker = context === "node-test-worker";
   const hasTestFlag = options.some((option) => option.name === "--test" && option.value === true);
   const testIsolation = optionValues(options, "--test-isolation");
   const experimentalTestIsolation = optionValues(options, "--experimental-test-isolation");
@@ -434,7 +511,9 @@ export function nodeTestInvocationContract(command, { context } = {}) {
   const testRerunFailures = optionValues(options, "--test-rerun-failures");
   const testRandomSeeds = optionValues(options, "--test-random-seed");
   const watchPaths = optionValues(options, "--watch-path");
-  const { generatedDefaultOptions, unmodeledOptions } = classifyInvocationOptions(options);
+  const { generatedDefaultOptions, unmodeledOptions } = classifyInvocationOptions(options, {
+    allowGeneratedDefaults: isNodeTestWorker,
+  });
   const testOnly = booleanOptionValue(options, "--test-only");
   const testRandomize = booleanOptionValue(options, "--test-randomize");
   const watch = booleanOptionValue(options, "--watch");
@@ -713,12 +792,11 @@ export async function collectRunProvenance({
   const resolvedBaseRef = baseRef
     ?? environment.HARBOR_NATIVE_BASE_REF
     ?? (environment.GITHUB_BASE_REF ? `origin/${environment.GITHUB_BASE_REF}` : "feature/harbor-clo-159");
-  const invocationContext = environment.NODE_TEST_CONTEXT?.startsWith("child")
-    ? "node-test-worker"
-    : "main-process";
-  const invocationContract = nodeTestInvocationContract(command, { context: invocationContext });
   const rejectedEnvironmentNames = validateNativeElectronEnvironment(environment);
   if (rejectedEnvironmentNames.length > 0) {
+    const rejectedInvocationContext = environment.NODE_TEST_CONTEXT?.startsWith("child")
+      ? "unverified"
+      : "main-process";
     return {
       status: false,
       worktree: repoRoot,
@@ -729,8 +807,8 @@ export async function collectRunProvenance({
       repositoryStatus: "",
       invocation: {
         command,
-        contract: invocationContract,
-        context: invocationContext,
+        contract: nodeTestInvocationContract(command, { context: rejectedInvocationContext }),
+        context: rejectedInvocationContext,
         contextValue: environment.NODE_TEST_CONTEXT,
         cwd: process.cwd(),
         nodeExecutable: process.execPath,
@@ -755,6 +833,24 @@ export async function collectRunProvenance({
   }
   const errors = [];
   const commands = [];
+  const workerContext = await resolveNodeTestWorkerContext({
+    environment,
+    execFileFn,
+    parentPid: process.ppid,
+    nodeExecutable: process.execPath,
+    cwd: repoRoot,
+  });
+  if (workerContext.command) {
+    commands.push({
+      argv: workerContext.command,
+      cwd: repoRoot,
+      outcome: workerContext.error ? "FAILURE" : "PASS",
+      ...(workerContext.error ? { error: workerContext.error } : {}),
+    });
+  }
+  if (workerContext.error) errors.push(workerContext.error);
+  const invocationContext = workerContext.context;
+  const invocationContract = nodeTestInvocationContract(command, { context: invocationContext });
   const commandResult = async (commandName, args, { details = false } = {}) => {
     const result = await runCommand(commandName, args, repoRoot, execFileFn);
     commands.push({

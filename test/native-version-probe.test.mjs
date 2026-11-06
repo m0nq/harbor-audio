@@ -119,6 +119,7 @@ test("validates a private mode-700 run root", async () => {
 
 test("rejects NODE_OPTIONS before the native version probe spawn", async () => {
   let spawnCalled = false;
+  let execFileCalled = false;
   const result = await runVersionProbe({
     repoRoot: "/repo",
     electronExecutable: "/opt/Electron",
@@ -130,16 +131,20 @@ test("rejects NODE_OPTIONS before the native version probe spawn", async () => {
       spawnCalled = true;
       throw new Error("spawn must not be reached");
     },
-    execFileFn: fakeExecFile({
-      supervisorPid: 100,
-      childPid: 4242,
-      executable: "/opt/Electron",
-      childAlive: false,
-    }),
+    execFileFn: async (...args) => {
+      execFileCalled = true;
+      return fakeExecFile({
+        supervisorPid: 100,
+        childPid: 4242,
+        executable: "/opt/Electron",
+        childAlive: false,
+      })(...args);
+    },
     validateRunRootFn: async () => "/private/run-root",
   });
 
   assert.equal(spawnCalled, false);
+  assert.equal(execFileCalled, false);
   assert.equal(result.outcome, "HOLD");
   assert.match(result.errors.join("\n"), /NODE_OPTIONS/);
 });

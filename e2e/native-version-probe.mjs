@@ -741,15 +741,15 @@ export async function runVersionProbe({
   };
 
   try {
+    const rejectedEnvironmentNames = validateNativeElectronEnvironment(environment);
+    if (rejectedEnvironmentNames.length > 0) {
+      throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
+    }
     const supervisor = await verifySupervisor(execFileFn, supervisorPid);
     result.process.supervisorPgid = supervisor.pgid;
     if (!provenance?.status) throw new Error("exact native provenance is incomplete");
     if (provenance.toolchain?.electron !== expectedVersion) {
       throw new Error(`Electron package version is not ${expectedVersion}`);
-    }
-    const rejectedEnvironmentNames = validateNativeElectronEnvironment(environment);
-    if (rejectedEnvironmentNames.length > 0) {
-      throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
     }
     const provenanceMismatches = validateExpectedProvenance(provenance, expectedProvenance);
     if (provenanceMismatches.length > 0) {

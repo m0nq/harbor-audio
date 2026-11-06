@@ -19,6 +19,7 @@ import {
   expectedProvenanceFromEnvironment,
   launchProcessDiagnostics,
   nodeTestInvocationContract,
+  resolveNodeTestWorkerContext,
   persistDiagnostics,
   prepareIsolatedElectronProfile,
   recordProcessError,
@@ -266,21 +267,21 @@ test("matches the operator test command to a Node worker contract without compar
   );
   assert.match(
     validateExpectedProvenance(
-      { invocation: { command: [nodeExecutable, "--test-name-pattern=wrong", testFile] } },
+      { invocation: { command: [nodeExecutable, "--test-name-pattern=wrong", testFile], context: "node-test-worker" } },
       { invocationCommand: operatorCommand },
     ).join("\n"),
     /invocation testNamePatterns expected/,
   );
   assert.match(
     validateExpectedProvenance(
-      { invocation: { command: ["/wrong/node", ...workerCommand.slice(1)] } },
+      { invocation: { command: ["/wrong/node", ...workerCommand.slice(1)], context: "node-test-worker" } },
       { invocationCommand: operatorCommand },
     ).join("\n"),
     /invocation executable expected/,
   );
   assert.match(
     validateExpectedProvenance(
-      { invocation: { command: [nodeExecutable, "--test-name-pattern=^Converted Slice 1 functional Electron acceptance$", "/wrong/test.mjs"] } },
+      { invocation: { command: [nodeExecutable, "--test-name-pattern=^Converted Slice 1 functional Electron acceptance$", "/wrong/test.mjs"], context: "node-test-worker" } },
       { invocationCommand: operatorCommand },
     ).join("\n"),
     /invocation testFiles expected/,
@@ -295,6 +296,15 @@ test("matches the operator test command to a Node worker contract without compar
     ).join("\n"),
     /invocation contains unmodeled options: --require/,
   );
+
+  const mainWorkerDefaults = nodeTestInvocationContract(workerCommand, { context: "main-process" });
+  assert.equal(mainWorkerDefaults.valid, false);
+  assert.deepEqual(mainWorkerDefaults.unmodeledOptions, [
+    "--heap-prof-interval",
+    "--test-timeout",
+    "--inspect-port",
+    "--node-snapshot",
+  ]);
 });
 
 test("compares every modeled Node test control while rejecting changed values", () => {
@@ -365,6 +375,12 @@ test("fails closed for environment and strict Node option provenance", () => {
     [],
   );
 
+  const spoofedWorkerContract = nodeTestInvocationContract(
+    [executable, testFile],
+    { context: "main-process" },
+  );
+  assert.equal(spoofedWorkerContract.testRunnerMode, "script");
+
   const shortLoader = nodeTestInvocationContract([executable, "-r", "/tmp/loader.mjs", testFile]);
   assert.equal(shortLoader.valid, false);
   assert.deepEqual(shortLoader.unmodeledOptions, ["-r"]);
@@ -419,16 +435,17 @@ test("fails closed for environment and strict Node option provenance", () => {
   );
 });
 
-test("captures a real Node test-worker invocation and validates its stable contract", async () => {
+test("captures a Node test-worker invocation and validates its stable contract", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "harbor-worker-contract-"));
   const testFile = path.join(root, "worker-contract.test.mjs");
   const diagnosticsModule = pathToFileURL(path.resolve("e2e/launch-diagnostics.mjs")).href;
   await writeFile(testFile, [
     `import { test } from "node:test";`,
-    `import { currentInvocationCommand, nodeTestInvocationContract } from ${JSON.stringify(diagnosticsModule)};`,
-    "test(\"worker contract\", () => {",
+    `import { currentInvocationCommand, nodeTestInvocationContract, resolveNodeTestWorkerContext } from ${JSON.stringify(diagnosticsModule)};`,
+    "test(\"worker contract\", async () => {",
     "  const command = currentInvocationCommand();",
-    "  console.log(`HARBOR_WORKER_CONTRACT=${JSON.stringify({ command, contract: nodeTestInvocationContract(command), context: process.env.NODE_TEST_CONTEXT ?? null })}`);",
+    "  const context = await resolveNodeTestWorkerContext({ execFileFn: async () => ({ stdout: `${process.execPath} --test worker-parent.mjs\\n` }) });",
+    "  console.log(`HARBOR_WORKER_CONTRACT=${JSON.stringify({ command, contract: nodeTestInvocationContract(command, { context: context.context }), context })}`);",
     "});",
     "",
   ].join("\n"), "utf8");
@@ -451,7 +468,10 @@ test("captures a real Node test-worker invocation and validates its stable contr
     const match = output.match(/HARBOR_WORKER_CONTRACT=(\{[^\n]+\})/);
     assert.ok(match, output);
     const report = JSON.parse(match[1]);
-    assert.match(report.context, /^child/);
+    assert.match(report.context.contextValue, /^child/);
+    assert.equal(report.context.context, "node-test-worker", JSON.stringify(report));
+    assert.equal(report.context.verified, true);
+    assert.ok(report.context.parentPid > 0, JSON.stringify(report));
     assert.ok(report.command.length > 4, JSON.stringify(report));
     assert.deepEqual(report.contract.testFiles, [testFile]);
     assert.deepEqual(report.contract.testNamePatterns, ["worker contract"]);
@@ -468,6 +488,23 @@ test("captures a real Node test-worker invocation and validates its stable contr
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("does not trust a spoofed Node test-worker environment marker", async () => {
+  const context = await resolveNodeTestWorkerContext({
+    environment: { NODE_TEST_CONTEXT: "child-spoof" },
+    parentPid: 123,
+    nodeExecutable: process.execPath,
+    execFileFn: async () => ({ stdout: "/bin/zsh -c node /approved/worktree/script.mjs\n" }),
+  });
+  assert.equal(context.context, "unverified");
+  assert.equal(context.verified, false);
+  const contract = nodeTestInvocationContract(
+    [process.execPath, "/approved/worktree/script.mjs"],
+    { context: context.context },
+  );
+  assert.equal(contract.testRunnerMode, "script");
+  assert.equal(contract.valid, true);
 });
 
 test("selects exactly one native scenario and fails closed for invalid selectors", () => {
@@ -750,6 +787,7 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
     ["uname -m", "arm64\n"],
     [`file ${electronExecutable}`, `${electronExecutable}: Mach-O 64-bit executable arm64\n`],
     [`otool -l ${electronExecutable}`, "cmd LC_UUID\n    uuid 4C4C44AF-5555-3144-A1E7-7E571B4F50E9\n"],
+    [`/bin/ps -p ${process.ppid} -o command=`, `${process.execPath} --test e2e/converted-electron.test.mjs\n`],
   ]);
 
   const provenance = await collectRunProvenance({
@@ -759,6 +797,7 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
     playwrightPackageJson,
     baseRef: "feature/harbor-clo-159",
     command: ["node", "--test", "e2e/converted-electron.test.mjs"],
+    environment: { ...process.env, NODE_TEST_CONTEXT: "child-test" },
     execFileFn: async (command, args, options) => {
       assert.equal(options.timeout, DEFAULT_COMMAND_TIMEOUT_MS);
       return {
@@ -799,6 +838,7 @@ test("collects exact-head and artifact provenance for retained diagnostics", asy
   assert.match(provenance.artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(provenance.toolchain.pnpm, "12.12.1");
   assert.deepEqual(provenance.commands.map(({ argv, cwd, outcome }) => ({ argv, cwd, outcome })), [
+    { argv: ["/bin/ps", "-p", String(process.ppid), "-o", "command="], cwd: repoRoot, outcome: "PASS" },
     { argv: ["git", "rev-parse", "HEAD"], cwd: repoRoot, outcome: "PASS" },
     { argv: ["git", "rev-parse", "--verify", "feature/harbor-clo-159^{commit}"], cwd: repoRoot, outcome: "PASS" },
     { argv: ["git", "diff", "--name-only", "feature/harbor-clo-159...HEAD"], cwd: repoRoot, outcome: "PASS" },
@@ -924,6 +964,8 @@ test("accepts a valid empty changed-file list while rejecting malformed versions
     electronPackageJson,
     playwrightPackageJson,
     baseRef: "feature/harbor-clo-159",
+    environment: {},
+    command: [process.execPath, "--test", path.join(repoRoot, "provenance.test.mjs")],
     execFileFn: async (command, args) => ({
       stdout: outputs.get([command, ...args].join(" ")) ?? "",
     }),
@@ -937,6 +979,8 @@ test("accepts a valid empty changed-file list while rejecting malformed versions
     electronPackageJson,
     playwrightPackageJson,
     baseRef: "feature/harbor-clo-159",
+    environment: {},
+    command: [process.execPath, "--test", path.join(repoRoot, "provenance.test.mjs")],
     execFileFn: async (command, args) => ({
       stdout: [command, ...args].join(" ") === "sw_vers -productVersion"
         ? "not-a-version\n"
