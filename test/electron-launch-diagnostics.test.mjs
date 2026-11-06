@@ -505,6 +505,21 @@ test("does not trust a spoofed Node test-worker environment marker", async () =>
   );
   assert.equal(contract.testRunnerMode, "script");
   assert.equal(contract.valid, true);
+
+  for (const parentCommand of [
+    `${process.execPath} wrapper.mjs --test worker-parent.mjs\n`,
+    `${process.execPath} wrapper.mjs "--test" worker-parent.mjs\n`,
+    `${process.execPath} --title=--test wrapper.mjs\n`,
+  ]) {
+    const wrapperContext = await resolveNodeTestWorkerContext({
+      environment: { NODE_TEST_CONTEXT: "child-spoof" },
+      parentPid: 123,
+      nodeExecutable: process.execPath,
+      execFileFn: async () => ({ stdout: parentCommand }),
+    });
+    assert.equal(wrapperContext.context, "unverified", parentCommand);
+    assert.equal(wrapperContext.verified, false, parentCommand);
+  }
 });
 
 test("selects exactly one native scenario and fails closed for invalid selectors", () => {

@@ -145,10 +145,64 @@ function matchesCommandExecutable(command, executable) {
     || command.startsWith(`"${executable}" `);
 }
 
+function tokenizeProcessCommand(command) {
+  const tokens = [];
+  let token = "";
+  let tokenStarted = false;
+  let quote;
+  let escaped = false;
+  for (const character of command) {
+    if (escaped) {
+      token += character;
+      tokenStarted = true;
+      escaped = false;
+      continue;
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true;
+      tokenStarted = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      else token += character;
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quote = character;
+      tokenStarted = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (tokenStarted) {
+        tokens.push(token);
+        token = "";
+        tokenStarted = false;
+      }
+      continue;
+    }
+    token += character;
+    tokenStarted = true;
+  }
+  if (quote || escaped) return undefined;
+  if (tokenStarted) tokens.push(token);
+  return tokens;
+}
+
 function isNodeTestRunnerCommand(command, executable) {
-  return isNonEmptyString(command)
-    && matchesCommandExecutable(command, executable)
-    && /(?:^|\s)--test(?:=true)?(?:\s|$)/.test(command);
+  if (!isNonEmptyString(command) || !matchesCommandExecutable(command, executable)) return false;
+  const tokens = tokenizeProcessCommand(command);
+  if (!tokens || tokens[0] !== executable) return false;
+  let sawPositional = false;
+  for (const token of tokens.slice(1)) {
+    if (token === "--") {
+      sawPositional = true;
+      continue;
+    }
+    if (!sawPositional && (token === "--test" || token === "--test=true")) return true;
+    if (!token.startsWith("-")) sawPositional = true;
+  }
+  return false;
 }
 
 /**
