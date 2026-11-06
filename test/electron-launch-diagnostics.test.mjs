@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 import {
   buildFailureError,
   commandError,
@@ -17,6 +18,7 @@ import {
   finalizeDiagnostics,
   expectedProvenanceFromEnvironment,
   launchProcessDiagnostics,
+  nodeTestInvocationContract,
   persistDiagnostics,
   prepareIsolatedElectronProfile,
   recordProcessError,
@@ -214,6 +216,120 @@ test("records the Node exec arguments and resolves the test script path", () => 
     "--test",
     "/approved/worktree/e2e/converted-electron.test.mjs",
   ]);
+});
+
+test("matches the operator test command to a Node worker contract without comparing generated defaults", () => {
+  const nodeExecutable = "/opt/homebrew/Cellar/node/26.13.0_2/bin/node";
+  const testFile = "/approved/worktree/e2e/converted-electron.test.mjs";
+  const operatorCommand = [
+    nodeExecutable,
+    "--test",
+    "--test-name-pattern=^Converted Slice 1 functional Electron acceptance$",
+    testFile,
+  ];
+  const workerCommand = [
+    nodeExecutable,
+    "--heap-prof-interval=524288",
+    "--test-timeout=0",
+    "--test-isolation=process",
+    "--inspect-port=127.0.0.1:9229",
+    "--node-snapshot",
+    "--test-name-pattern=^Converted Slice 1 functional Electron acceptance$",
+    testFile,
+  ];
+
+  assert.notDeepEqual(workerCommand, operatorCommand);
+  assert.deepEqual(
+    validateExpectedProvenance(
+      { invocation: { command: workerCommand, contract: nodeTestInvocationContract(workerCommand) } },
+      { invocationCommand: operatorCommand },
+    ),
+    [],
+  );
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: [nodeExecutable, "--test-isolation=none", ...workerCommand.slice(1)] } },
+      { invocationCommand: operatorCommand },
+    ).join("\n"),
+    /invocation testIsolation expected "process" but was "none"/,
+  );
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: [nodeExecutable, "--watch", ...workerCommand.slice(1)] } },
+      { invocationCommand: operatorCommand },
+    ).join("\n"),
+    /invocation watch expected false but was true/,
+  );
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: [nodeExecutable, "--test-name-pattern=wrong", testFile] } },
+      { invocationCommand: operatorCommand },
+    ).join("\n"),
+    /invocation testNamePatterns expected/,
+  );
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: ["/wrong/node", ...workerCommand.slice(1)] } },
+      { invocationCommand: operatorCommand },
+    ).join("\n"),
+    /invocation executable expected/,
+  );
+  assert.match(
+    validateExpectedProvenance(
+      { invocation: { command: [nodeExecutable, "--test-name-pattern=^Converted Slice 1 functional Electron acceptance$", "/wrong/test.mjs"] } },
+      { invocationCommand: operatorCommand },
+    ).join("\n"),
+    /invocation testFiles expected/,
+  );
+});
+
+test("captures a real Node test-worker invocation and validates its stable contract", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "harbor-worker-contract-"));
+  const testFile = path.join(root, "worker-contract.test.mjs");
+  const diagnosticsModule = pathToFileURL(path.resolve("e2e/launch-diagnostics.mjs")).href;
+  await writeFile(testFile, [
+    `import { test } from "node:test";`,
+    `import { currentInvocationCommand, nodeTestInvocationContract } from ${JSON.stringify(diagnosticsModule)};`,
+    "test(\"worker contract\", () => {",
+    "  const command = currentInvocationCommand();",
+    "  console.log(`HARBOR_WORKER_CONTRACT=${JSON.stringify({ command, contract: nodeTestInvocationContract(command), context: process.env.NODE_TEST_CONTEXT ?? null })}`);",
+    "});",
+    "",
+  ].join("\n"), "utf8");
+
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  try {
+    const result = spawnSync(process.execPath, [
+      "--test",
+      "--test-name-pattern=worker contract",
+      testFile,
+    ], {
+      cwd: path.resolve("."),
+      env: environment,
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+    assert.equal(result.status, 0, output);
+    const match = output.match(/HARBOR_WORKER_CONTRACT=(\{[^\n]+\})/);
+    assert.ok(match, output);
+    const report = JSON.parse(match[1]);
+    assert.match(report.context, /^child/);
+    assert.ok(report.command.length > 4, JSON.stringify(report));
+    assert.deepEqual(report.contract.testFiles, [testFile]);
+    assert.deepEqual(report.contract.testNamePatterns, ["worker contract"]);
+    assert.equal(report.contract.testIsolation, "process");
+    assert.deepEqual(
+      validateExpectedProvenance(
+        { invocation: report },
+        { invocationCommand: [process.execPath, "--test", "--test-name-pattern=worker contract", testFile] },
+      ),
+      [],
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("selects exactly one native scenario and fails closed for invalid selectors", () => {

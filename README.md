@@ -130,10 +130,15 @@ retains the evidence root and stops the native sequence; do not proceed to the
 full GUI suite until the probe is a verified `PASS`.
 
 The full GUI suite must use the same exact provenance values but set
-`HARBOR_NATIVE_EXPECTED_INVOCATION` to
+`HARBOR_NATIVE_EXPECTED_INVOCATION` to the operator's command, for example
 `["/opt/homebrew/bin/node","--test","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
-Replace `<approved-worktree-path>` with the exact canonical worktree path;
-the harness records Node's `--test` exec argument and the resolved test path.
+Replace `<approved-worktree-path>` with the exact canonical worktree path.
+Node's isolated test worker may add runtime defaults to `process.execArgv`; the
+harness retains that raw worker invocation for diagnostics but validates the
+stable contract separately: executable, test files, selection patterns,
+isolation, watch/shard controls, setup and rerun controls, and test-only or
+module-mock behavior. It does not compare generated heap, inspector, coverage,
+or other machine-specific defaults byte-for-byte.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only

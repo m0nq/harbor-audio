@@ -233,6 +233,122 @@ export async function prepareIsolatedElectronProfile({
   }
 }
 
+const NODE_TEST_VALUE_OPTIONS = new Set([
+  "--test-name-pattern",
+  "--test-skip-pattern",
+  "--test-isolation",
+  "--experimental-test-isolation",
+  "--test-shard",
+  "--test-global-setup",
+  "--test-rerun-failures",
+  "--test-random-seed",
+  "--watch-path",
+]);
+
+function parseInvocationTokens(tokens) {
+  const options = [];
+  const positionals = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (!isNonEmptyString(token) || !token.startsWith("--")) {
+      positionals.push(token);
+      continue;
+    }
+
+    const separator = token.indexOf("=");
+    const name = separator === -1 ? token : token.slice(0, separator);
+    let value = separator === -1 ? true : token.slice(separator + 1);
+    if (separator === -1 && NODE_TEST_VALUE_OPTIONS.has(name) && index + 1 < tokens.length) {
+      value = tokens[index + 1];
+      index += 1;
+    }
+    options.push({ name, value });
+  }
+  return { options, positionals };
+}
+
+function optionValues(options, name) {
+  return options.filter((option) => option.name === name).map((option) => option.value);
+}
+
+function hasOption(options, name) {
+  return options.some((option) => option.name === name);
+}
+
+/**
+ * Describes the stable Node test-runner contract shared by the operator's
+ * command and an isolated test worker. The raw command remains evidence, but
+ * Node-generated worker defaults are intentionally not treated as operator
+ * intent or compared byte-for-byte.
+ */
+export function nodeTestInvocationContract(command) {
+  if (!Array.isArray(command) || command.length < 2 || !isNonEmptyString(command[0])) {
+    return { valid: false };
+  }
+
+  const { options, positionals } = parseInvocationTokens(command.slice(1));
+  const testIsolation = optionValues(options, "--test-isolation");
+  const experimentalTestIsolation = optionValues(options, "--experimental-test-isolation");
+  const testNamePatterns = optionValues(options, "--test-name-pattern");
+  const testSkipPatterns = optionValues(options, "--test-skip-pattern");
+  const testShards = optionValues(options, "--test-shard");
+  const testGlobalSetups = optionValues(options, "--test-global-setup");
+  const testRerunFailures = optionValues(options, "--test-rerun-failures");
+  const testRandomSeeds = optionValues(options, "--test-random-seed");
+  const watchPaths = optionValues(options, "--watch-path");
+  return {
+    valid: positionals.length > 0 && positionals.every(isNonEmptyString),
+    executable: command[0],
+    testFiles: positionals,
+    testNamePatterns,
+    testSkipPatterns,
+    testIsolation: testIsolation[0] ?? experimentalTestIsolation[0] ?? "process",
+    testOnly: hasOption(options, "--test-only"),
+    testShard: testShards[0] ?? null,
+    testGlobalSetup: testGlobalSetups[0] ?? null,
+    testRerunFailures: testRerunFailures[0] ?? null,
+    testRandomize: hasOption(options, "--test-randomize"),
+    testRandomSeed: testRandomSeeds[0] ?? null,
+    watch: hasOption(options, "--watch") || watchPaths.length > 0,
+    watchPaths,
+    watchPreserveOutput: hasOption(options, "--watch-preserve-output"),
+    moduleMocks: hasOption(options, "--experimental-test-module-mocks"),
+    forceExit: hasOption(options, "--test-force-exit"),
+  };
+}
+
+function compareInvocationContracts(actual, expected) {
+  const mismatches = [];
+  if (!actual?.valid || !expected?.valid) {
+    mismatches.push("invocation contract is missing or malformed");
+    return mismatches;
+  }
+
+  for (const field of [
+    "executable",
+    "testFiles",
+    "testNamePatterns",
+    "testSkipPatterns",
+    "testIsolation",
+    "testOnly",
+    "testShard",
+    "testGlobalSetup",
+    "testRerunFailures",
+    "testRandomize",
+    "testRandomSeed",
+    "watch",
+    "watchPaths",
+    "watchPreserveOutput",
+    "moduleMocks",
+    "forceExit",
+  ]) {
+    if (JSON.stringify(actual[field]) !== JSON.stringify(expected[field])) {
+      mismatches.push(`invocation ${field} expected ${JSON.stringify(expected[field])} but was ${JSON.stringify(actual[field])}`);
+    }
+  }
+  return mismatches;
+}
+
 export function currentInvocationCommand({
   execPath = process.execPath,
   execArgv = process.execArgv,
@@ -319,19 +435,26 @@ export function validateExpectedProvenance(provenance, expectations = {}) {
   compare("repository package SHA-256", provenance?.artifact?.repositoryPackageJsonSha256, expectations.packageJsonSha256);
   compare("lockfile SHA-256", provenance?.artifact?.lockfileSha256, expectations.lockfileSha256);
   compare("invocation cwd", provenance?.invocation?.cwd, expectations.invocationCwd);
-  if (expectations.invocationCommand !== undefined) {
-    if (!Array.isArray(expectations.invocationCommand)) {
-      mismatches.push("invocation command expectation is invalid");
-    } else if (JSON.stringify(provenance?.invocation?.command) !== JSON.stringify(expectations.invocationCommand)) {
-      mismatches.push(`invocation command expected ${JSON.stringify(expectations.invocationCommand)} but was ${JSON.stringify(provenance?.invocation?.command)}`);
-    }
-  }
   compare("branch/status", provenance?.repositoryStatus?.split("\n", 1)[0], expectations.branchStatus);
 
   if (expectations.requireCleanWorkingTree) {
     const statusLines = String(provenance?.repositoryStatus ?? "").split("\n").filter(Boolean);
     if (statusLines.length !== 1 || !statusLines[0].startsWith("## ")) {
       mismatches.push("working tree is not clean");
+    }
+  }
+
+  if (expectations.invocationCommand !== undefined) {
+    if (!Array.isArray(expectations.invocationCommand)) {
+      mismatches.push("invocation command expectation is invalid");
+    } else {
+      const expectedInvocation = nodeTestInvocationContract(expectations.invocationCommand);
+      const actualInvocation = provenance?.invocation?.contract
+        ?? nodeTestInvocationContract(provenance?.invocation?.command);
+      const invocationMismatches = compareInvocationContracts(actualInvocation, expectedInvocation);
+      if (invocationMismatches.length > 0) {
+        mismatches.push(`invocation command expected contract ${JSON.stringify(expectedInvocation)} but was ${JSON.stringify(actualInvocation)}: ${invocationMismatches.join("; ")}`);
+      }
     }
   }
 
@@ -491,6 +614,7 @@ export async function collectRunProvenance({
   const changedFiles = changedFilesText === undefined
     ? undefined
     : changedFilesText.split("\n").filter(Boolean);
+  const invocationContract = nodeTestInvocationContract(command);
   const required = [
     ["head SHA", () => isSha(headSha, 40)],
     ["base SHA", () => isSha(baseSha, 40)],
@@ -511,6 +635,7 @@ export async function collectRunProvenance({
     ["changed-files output", () => changedFilesOutputPresent],
     ["changed-files list", () => Array.isArray(changedFiles)],
     ["invocation command", () => Array.isArray(command) && command.length > 0],
+    ["invocation contract", () => invocationContract.valid],
     ["invocation cwd", () => isNonEmptyString(process.cwd())],
     ["Node executable", () => isNonEmptyString(process.execPath)],
   ];
@@ -529,6 +654,9 @@ export async function collectRunProvenance({
     repositoryStatus,
     invocation: {
       command,
+      contract: invocationContract,
+      context: process.env.NODE_TEST_CONTEXT?.startsWith("child") ? "node-test-worker" : "main-process",
+      contextValue: process.env.NODE_TEST_CONTEXT,
       cwd: process.cwd(),
       nodeExecutable: process.execPath,
       electronOverridesRemoved: [
