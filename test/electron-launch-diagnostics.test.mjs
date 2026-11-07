@@ -19,6 +19,7 @@ import {
   expectedProvenanceFromEnvironment,
   hashApplicationBuild,
   nativeRunScope,
+  requireApplicationBuildHash,
   launchProcessDiagnostics,
   nodeTestInvocationContract,
   resolveNodeTestWorkerContext,
@@ -513,6 +514,16 @@ test("hashes the complete application build and rejects symlinks", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("refuses changed or unreadable builds on repeated boundary checks", async () => {
+  const expected = "a".repeat(64);
+  let current = { sha256: expected };
+  const hash = async () => current;
+  assert.equal(await requireApplicationBuildHash("/build", expected, hash), current);
+  current = { sha256: "b".repeat(64) };
+  await assert.rejects(requireApplicationBuildHash("/build", expected, hash), /does not match/);
+  await assert.rejects(requireApplicationBuildHash("/build", expected, async () => { throw new Error("unreadable"); }), /unreadable/);
 });
 
 test("classifies every Node selection control as diagnostic", () => {

@@ -12,6 +12,7 @@ import {
   finalizeDiagnostics,
   hashApplicationBuild,
   nativeRunScope,
+  requireApplicationBuildHash,
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
   createBoundedDiagnosticsCapture,
@@ -183,11 +184,12 @@ async function withElectronLaunch(scenario, callback) {
       diagnostics.disposition = "HOLD";
       throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
     }
-    diagnostics.preLaunchBuild = await hashApplicationBuild(path.join(repoRoot, "dist"));
-    if (validateApplicationBuildHash(diagnostics.preLaunchBuild, expectedBuildSha256).length) {
+    try {
+      diagnostics.preLaunchBuild = await requireApplicationBuildHash(path.join(repoRoot, "dist"), expectedBuildSha256);
+    } catch (error) {
       diagnostics.startupPhase = "provenance-gate";
       diagnostics.disposition = "HOLD";
-      throw new Error("Application build changed before launch");
+      throw new Error("Application build could not be verified before launch", { cause: error });
     }
     const electronEnvironment = isolatedEnvironment();
     diagnostics.startupPhase = "electron-launch";
@@ -269,10 +271,7 @@ async function withElectronLaunch(scenario, callback) {
 
     await callback({ electronApp, page });
 
-    diagnostics.postScenarioBuild = await hashApplicationBuild(path.join(repoRoot, "dist"));
-    if (validateApplicationBuildHash(diagnostics.postScenarioBuild, expectedBuildSha256).length) {
-      throw new Error("Application build changed during scenario");
-    }
+    diagnostics.postScenarioBuild = await requireApplicationBuildHash(path.join(repoRoot, "dist"), expectedBuildSha256);
 
     passed = true;
     diagnostics.startupPhase = "application-workflow";

@@ -295,6 +295,13 @@ export function validateApplicationBuildHash(build, expected) {
   return [];
 }
 
+export async function requireApplicationBuildHash(buildRoot, expected, hashFn = hashApplicationBuild) {
+  const build = await hashFn(buildRoot);
+  const errors = validateApplicationBuildHash(build, expected);
+  if (errors.length) throw new Error(errors.join("; "));
+  return build;
+}
+
 export function nativeRunScope(contract, selectedScenario) {
   if (!contract?.valid || selectedScenario !== undefined || contract.testNamePatterns?.length
     || contract.testSkipPatterns?.length || contract.testOnly || contract.testShard
