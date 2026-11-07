@@ -129,9 +129,12 @@ child/descendant cleanup. `FAILURE`, `TIMEOUT`, `INCONCLUSIVE`, or `HOLD`
 retains the evidence root and stops the native sequence; do not proceed to the
 full GUI suite until the probe is a verified `PASS`.
 
-The full GUI suite must use the same exact provenance values but set
+The full GUI suite must use `--test-isolation=none` so the GUI provenance
+gate can validate the test runner's directly observed invocation. An isolated
+worker or unverified context is rejected before Electron launch. The suite
+must use the same exact provenance values but set
 `HARBOR_NATIVE_EXPECTED_INVOCATION` to the operator's command, for example
-`["/opt/homebrew/bin/node","--test","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
+`["/opt/homebrew/bin/node","--test","--test-isolation=none","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
 Replace `<approved-worktree-path>` with the exact canonical worktree path.
 Node's isolated test worker may add runtime defaults to `process.execArgv`; the
 harness retains that raw worker invocation for diagnostics but validates the
@@ -149,9 +152,9 @@ Electron launch; the inherited environment is otherwise preserved. Generated
 defaults are accepted only for a worker whose `NODE_TEST_CONTEXT` marker and
 direct parent command independently verify a Node `--test` runner; the marker
 alone is not trusted. The contract records `test-runner`, verified
-`test-worker`, ordinary `script`, and unverified context separately: a GUI
-expectation requires `--test`, while the worker may omit it only after that
-parent-process verification. A rejected environment stops provenance
+`test-worker`, ordinary `script`, and unverified context separately. Worker
+classification is diagnostic only; GUI acceptance requires the direct
+non-isolated runner described above. A rejected environment stops provenance
 collection before any preflight subprocess is started.
 
 The E2E harness launches the physically resolved Electron executable, creates

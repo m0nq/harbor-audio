@@ -689,6 +689,16 @@ function canonicalPath(value) {
   }
 }
 
+export function validateDirectGuiTestInvocation(provenance) {
+  const invocation = provenance?.invocation;
+  const contract = invocation?.contract;
+  if (invocation?.context !== "main-process" || !contract?.valid
+    || contract.testRunnerMode !== "test-runner" || contract.testIsolation !== "none") {
+    return ["GUI acceptance requires a directly observed Node test runner with --test-isolation=none"];
+  }
+  return [];
+}
+
 export function validateExpectedProvenance(provenance, expectations = {}) {
   const mismatches = [];
   const compare = (label, actual, expected) => {

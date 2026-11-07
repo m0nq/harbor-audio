@@ -20,6 +20,7 @@ import {
   launchProcessDiagnostics,
   nodeTestInvocationContract,
   resolveNodeTestWorkerContext,
+  validateDirectGuiTestInvocation,
   persistDiagnostics,
   prepareIsolatedElectronProfile,
   recordProcessError,
@@ -488,6 +489,19 @@ test("captures a Node test-worker invocation and validates its stable contract",
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("requires direct non-isolated GUI runner provenance", () => {
+  const executable = process.execPath;
+  const file = "/approved/test.mjs";
+  const direct = nodeTestInvocationContract([executable, "--test", "--test-isolation=none", file], { context: "main-process" });
+  assert.deepEqual(validateDirectGuiTestInvocation({ invocation: { context: "main-process", contract: direct } }), []);
+  for (const context of ["node-test-worker", "unverified", undefined]) {
+    assert.notDeepEqual(validateDirectGuiTestInvocation({ invocation: { context, contract: direct } }), []);
+  }
+  const isolated = nodeTestInvocationContract([executable, "--test", file], { context: "main-process" });
+  assert.notDeepEqual(validateDirectGuiTestInvocation({ invocation: { context: "main-process", contract: isolated } }), []);
+  assert.notDeepEqual(validateDirectGuiTestInvocation({}), []);
 });
 
 test("recognizes the physical Node executable through a real symlink", async () => {

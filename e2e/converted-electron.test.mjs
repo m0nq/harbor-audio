@@ -18,6 +18,7 @@ import {
   recordProcessError,
   utf8Prefix,
   validateNativeElectronEnvironment,
+  validateDirectGuiTestInvocation,
   validateExpectedProvenance,
   waitForPostCloseSettlement,
 } from "./launch-diagnostics.mjs";
@@ -59,6 +60,7 @@ const collectedProvenance = await collectRunProvenance({
 const provenanceMismatches = validateExpectedProvenance(collectedProvenance, expectedProvenance);
 const provenanceExpectationErrors = [
   ...missingExpectedProvenance.map((name) => `exact native provenance expectation is missing: ${name}`),
+  ...validateDirectGuiTestInvocation(collectedProvenance),
   ...provenanceMismatches.map((error) => `exact native provenance mismatch: ${error}`),
 ];
 const runProvenance = {
