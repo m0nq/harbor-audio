@@ -192,16 +192,8 @@ function isNodeTestRunnerCommand(command, executable) {
   } catch {
     return false;
   }
-  let sawPositional = false;
-  for (const token of tokens.slice(1)) {
-    if (token === "--") {
-      sawPositional = true;
-      continue;
-    }
-    if (!sawPositional && (token === "--test" || token === "--test=true")) return true;
-    if (!token.startsWith("-")) sawPositional = true;
-  }
-  return false;
+  const contract = nodeTestInvocationContract(tokens, { context: "main-process" });
+  return contract.valid && contract.testRunnerMode === "test-runner";
 }
 
 /**

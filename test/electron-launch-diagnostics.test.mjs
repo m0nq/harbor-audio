@@ -508,6 +508,9 @@ test("recognizes the physical Node executable through a real symlink", async () 
       `/bin/sh --test example.test.mjs`,
       `node --test example.test.mjs`,
       `${alias} wrapper.mjs --test example.test.mjs`,
+      `${alias} --require=unexpected --test example.test.mjs`,
+      `${alias} --test --test=false example.test.mjs`,
+      `${alias} --test "unterminated`,
     ]) {
       const rejected = await resolveNodeTestWorkerContext({
         environment: { NODE_TEST_CONTEXT: "child-v8" },
