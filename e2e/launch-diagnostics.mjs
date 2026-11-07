@@ -139,12 +139,6 @@ async function runCommand(command, args, cwd, execFileFn) {
   }
 }
 
-function matchesCommandExecutable(command, executable) {
-  return command === executable
-    || command.startsWith(`${executable} `)
-    || command.startsWith(`"${executable}" `);
-}
-
 function tokenizeProcessCommand(command) {
   const tokens = [];
   let token = "";
@@ -190,9 +184,14 @@ function tokenizeProcessCommand(command) {
 }
 
 function isNodeTestRunnerCommand(command, executable) {
-  if (!isNonEmptyString(command) || !matchesCommandExecutable(command, executable)) return false;
+  if (!isNonEmptyString(command) || !isNonEmptyString(executable) || !path.isAbsolute(executable)) return false;
   const tokens = tokenizeProcessCommand(command);
-  if (!tokens || tokens[0] !== executable) return false;
+  if (!tokens || !path.isAbsolute(tokens[0] ?? "")) return false;
+  try {
+    if (realpathSync.native(tokens[0]) !== realpathSync.native(executable)) return false;
+  } catch {
+    return false;
+  }
   let sawPositional = false;
   for (const token of tokens.slice(1)) {
     if (token === "--") {

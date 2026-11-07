@@ -490,6 +490,45 @@ test("captures a Node test-worker invocation and validates its stable contract",
   }
 });
 
+test("recognizes the physical Node executable through a real symlink", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "harbor-node-identity-"));
+  const alias = path.join(root, "node");
+  try {
+    await symlink(process.execPath, alias);
+    const context = await resolveNodeTestWorkerContext({
+      environment: { NODE_TEST_CONTEXT: "child-v8" },
+      parentPid: 123,
+      nodeExecutable: process.execPath,
+      execFileFn: async () => ({ stdout: `${alias} --test example.test.mjs\n` }),
+    });
+    assert.equal(context.verified, true);
+    assert.equal(context.context, "node-test-worker");
+    for (const parent of [
+      `${path.join(root, "missing")} --test example.test.mjs`,
+      `/bin/sh --test example.test.mjs`,
+      `node --test example.test.mjs`,
+      `${alias} wrapper.mjs --test example.test.mjs`,
+    ]) {
+      const rejected = await resolveNodeTestWorkerContext({
+        environment: { NODE_TEST_CONTEXT: "child-v8" },
+        parentPid: 123,
+        nodeExecutable: process.execPath,
+        execFileFn: async () => ({ stdout: parent }),
+      });
+      assert.equal(rejected.verified, false, parent);
+    }
+    const unresolvedExpected = await resolveNodeTestWorkerContext({
+      environment: { NODE_TEST_CONTEXT: "child-v8" },
+      parentPid: 123,
+      nodeExecutable: path.join(root, "missing"),
+      execFileFn: async () => ({ stdout: `${alias} --test example.test.mjs` }),
+    });
+    assert.equal(unresolvedExpected.verified, false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("does not trust a spoofed Node test-worker environment marker", async () => {
   const context = await resolveNodeTestWorkerContext({
     environment: { NODE_TEST_CONTEXT: "child-spoof" },
