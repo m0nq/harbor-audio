@@ -87,14 +87,115 @@ pnpm test
 
 Run the isolated Electron E2E suite from a macOS desktop session:
 
+Use the gated procedure below; a bare `node --test` invocation lacks the
+required provenance expectations and is not an acceptance command.
+
+From an authorized physical macOS Aqua/Terminal session, run the bounded
+version probe before the full GUI suite:
+
 ```zsh
-/opt/homebrew/bin/node --test e2e/converted-electron.test.mjs
+env \
+  HARBOR_NATIVE_EXPECTED_WORKTREE='<approved-worktree-path>' \
+  HARBOR_NATIVE_EXPECTED_BASE_REF='feature/harbor-clo-159' \
+  HARBOR_NATIVE_EXPECTED_BASE_SHA='<approved-base-sha>' \
+  HARBOR_NATIVE_EXPECTED_HEAD_SHA='<approved-exact-head-sha>' \
+  HARBOR_NATIVE_EXPECTED_NODE_VERSION='<approved-node-version>' \
+  HARBOR_NATIVE_EXPECTED_PNPM_VERSION='12.12.1' \
+  HARBOR_NATIVE_EXPECTED_MACOS_VERSION='<approved-macos-version>' \
+  HARBOR_NATIVE_EXPECTED_HOST_ARCHITECTURE='<approved-host-architecture>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_ARCHITECTURE='<approved-artifact-architecture>' \
+  HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_VERSION='<approved-playwright-version>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_UUID='<approved-artifact-uuid>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_SHA256='<approved-executable-sha256>' \
+  HARBOR_NATIVE_EXPECTED_ELECTRON_PACKAGE_SHA256='<approved-electron-package-sha256>' \
+  HARBOR_NATIVE_EXPECTED_PLAYWRIGHT_PACKAGE_SHA256='<approved-playwright-package-sha256>' \
+  HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256='<approved-package-json-sha256>' \
+  HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256='<approved-lockfile-sha256>' \
+  HARBOR_NATIVE_EXPECTED_BRANCH_STATUS='## <approved-branch-status>' \
+  HARBOR_NATIVE_EXPECTED_INVOCATION='["<physical-node-path>","<approved-worktree-path>/e2e/native-version-probe.mjs"]' \
+  /opt/homebrew/bin/node e2e/native-version-probe.mjs
 ```
+
+The probe verifies the exact worktree and Electron artifact, creates a private
+mode-700 evidence root, preserves the normal macOS environment while removing
+only Electron override variables, and launches only the direct child
+`Electron --version` process. It records individual PID/PPID/PGID observations
+but never signals a process group or matches process names. Every placeholder
+must be replaced with independently recorded values for the exact approved
+worktree/head; missing or mismatched values fail closed before launch. `PASS`
+requires exact version output, observed process `close`, and verified
+child/descendant cleanup. `FAILURE`, `TIMEOUT`, `INCONCLUSIVE`, or `HOLD`
+retains the evidence root and stops the native sequence; do not proceed to the
+full GUI suite until the probe is a verified `PASS`.
+
+The full GUI suite must use `--test-isolation=none` so the GUI provenance
+gate can validate the test runner's directly observed invocation. An isolated
+worker or unverified context is rejected before Electron launch. The suite
+must use the same exact provenance values but set
+`HARBOR_NATIVE_EXPECTED_INVOCATION` to the operator's command, for example
+`["<physical-node-path>","--test","--test-isolation=none","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
+Replace `<physical-node-path>` with the independently verified physical Node
+executable path (`process.execPath`), and `<approved-worktree-path>` with the
+exact canonical worktree path. A focused `HARBOR_NATIVE_SCENARIO` run is a
+diagnostic, not full-suite acceptance; inspect the test counts and skipped
+scenarios before recording any result.
+
+For GUI runs, set `HARBOR_NATIVE_EXPECTED_BUILD_SHA256` to the independently
+recorded digest of `dist/` after a successful fresh build in the clean,
+exact-SHA worktree. Compute it from that worktree using:
+
+```zsh
+/opt/homebrew/bin/node --input-type=module -e 'import { hashApplicationBuild } from "./e2e/launch-diagnostics.mjs"; console.log((await hashApplicationBuild("dist")).sha256)'
+```
+
+Record the build command, result, clean status, SHA and digest in the evidence.
+The digest is rechecked before each launch and after each successful scenario;
+it does not by itself prove which source revision produced those bytes or rule
+out concurrent changes between checks. Missing, symlinked, unreadable or
+mismatched build output stops the GUI run. A successful fresh build and its
+complete output inventory remain required acceptance evidence.
+Node's isolated test worker may add runtime defaults to `process.execArgv`; the
+harness retains that raw worker invocation for diagnostics but validates the
+stable contract separately: executable, test files, selection patterns,
+isolation, watch/shard controls, setup and rerun controls, and test-only or
+module-mock behavior. It does not compare the known Node 26 worker-generated
+defaults byte-for-byte, but records their option names and accepts only the
+exact observed default values. Every other option—including loader, import,
+permission, policy, reporter, or changed generated-default options—is
+unmodeled and fails closed before Electron launch. This keeps the raw command
+available for review without silently accepting execution-affecting flags.
+Short option aliases, malformed boolean values, conflicting duplicate
+single-valued controls, and non-empty `NODE_OPTIONS` are also rejected before
+Electron launch; the inherited environment is otherwise preserved. Generated
+defaults are accepted only for a worker whose `NODE_TEST_CONTEXT` marker and
+direct parent command independently verify a Node `--test` runner; the marker
+alone is not trusted. The contract records `test-runner`, verified
+`test-worker`, ordinary `script`, and unverified context separately. Worker
+classification is diagnostic only; GUI acceptance requires the direct
+non-isolated runner described above. A rejected environment stops provenance
+collection before any preflight subprocess is started.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only
-processes and profiles owned by the test. Failed diagnostics may be retained
-for review.
+processes and profiles owned by the test. Diagnostics are sanitized before
+persistence. The harness removes a profile only after a passing callback,
+verified child exit, and successful diagnostic persistence; failed or uncertain
+cleanup retains the profile and diagnostic path for review. A pre-renderer
+launch abort remains native acceptance HOLD rather than an application-test
+failure or a native pass.
+
+In a fresh exact-pinned dependency tree, Electron 44 may have package metadata
+without its native bundle until the package is required. Treat native artifact
+materialization as a separate approved dependency-bootstrap step before direct
+executable E2E; record the resulting executable path, UUID, architecture, and
+SHA-256. Do not make the acceptance harness download or replace dependencies.
+For example, from the approved bootstrap environment:
+
+```zsh
+/opt/homebrew/bin/node -e "console.log(require('electron'))"
+```
+
+This command is dependency materialization evidence, not native acceptance.
 
 ## Architecture
 

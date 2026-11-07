@@ -1,0 +1,147 @@
+# HARBOR-NATIVE-01 v0.2 — Native Electron Acceptance
+
+Status: approved Loop 1 contract; implementation and execution evidence are
+recorded separately.
+
+## Purpose
+
+Establish a safe, repeatable native Electron acceptance lane for the local,
+fixture-backed Harbor Audio workflow. Native acceptance is independent of
+Node/JSDOM acceptance and does not claim real media, provider, account, DRM,
+network, or filesystem conversion behavior.
+
+## Provenance gate
+
+Every native run records the exact worktree, base SHA, tested HEAD SHA, changed
+files, repository status, Node and pnpm versions, macOS version and architecture,
+Electron executable path, architecture, UUID, SHA-256, and the exact commands.
+
+The Electron executable must be physically resolved from the dependency tree or
+from an independently recorded byte-identical artifact. A historical native
+pass without exact-head provenance is not current acceptance evidence.
+
+If a fresh frozen-lockfile install has only Electron package metadata, native
+artifact materialization is a separate approved bootstrap step. Its command,
+resolved path, UUID, architecture, and SHA-256 are recorded before acceptance;
+the E2E harness must not silently download or replace dependencies.
+
+## Runtime and security gate
+
+The run uses an authorized macOS desktop context, the pinned Electron 44.7.0
+artifact, and test-owned temporary `userData` and `sessionData` paths. Process
+cleanup must prove ownership through launch handles or verified PID, ancestry,
+and process identity. Broad process termination, process-name matching, sandbox
+bypass, signing changes, quarantine removal, fuse changes, LaunchServices repair,
+and global security changes are prohibited.
+
+If the runtime aborts before renderer startup, preserve diagnostics and classify
+native acceptance as HOLD. Do not reinterpret the failure as an application test
+failure or as successful acceptance.
+
+## Required workflow acceptance
+
+The native suite must verify the actual synthetic Browser → Converting →
+Converted workflow:
+
+- Browser source insertion, duplicate prevention, stable source/session identity,
+  and insertion order.
+- Waiting → Analyzing → Converting → Converted transitions.
+- Removal of completed items from the active session presentation.
+- Exactly one completed-session record in Converted.
+- Preservation of demonstration history, Search, filtering, sorting, and result
+  count boundaries.
+- Navigation preservation and fresh-launch reset.
+- Simulated-completion and no-output-file communication.
+- Existing regressions, empty states, focus behavior, and fixture boundaries.
+
+The complete applicable Electron E2E suite is mandatory. Optional diagnostic
+instrumentation is run when useful and recorded separately.
+
+## Accessibility lanes
+
+Physical keyboard and VoiceOver verification are independent acceptance lanes;
+JSDOM and simulated Playwright key events cannot substitute for them.
+
+Manual evidence records focus order, native control behavior, labels, status
+updates, focus recovery, and empty states. A single lifecycle transition must
+produce one meaningful completion announcement identifying the item, Converted,
+and the simulated/no-output boundary. Terminal or duplicate activation must not
+produce a new announcement.
+
+The possible duplicate completion-announcement behavior remains an Observation
+until actual assistive-technology evidence establishes its impact. Unperformed
+or blocked manual checks remain unverified and require explicit risk disposition.
+
+## Approved Linear contract traceability
+
+CLO-160 is the authority for the approved HARBOR-NATIVE-01 v0.2 acceptance
+contract. The following traceability preserves the approved AC-01 through AC-08
+scope without expanding native acceptance:
+
+- AC-01 — record exact worktree, base and tested HEAD SHAs, changed files and
+  status; the physical Electron executable path, architecture, UUID, and
+  SHA-256; package and lockfile hashes; Node, pnpm, Electron, Playwright, and
+  macOS versions; environment and invocation; isolated profiles; commands,
+  counts, logs, cleanup results, and the exact dependency artifact. Treat
+  pre-renderer aborts as runtime/harness evidence, not independent application
+  defects.
+- AC-02 — keep SIGABRT analysis bounded to the observed execution context and
+  hypotheses; do not bypass security, change global settings, add providers,
+  credentials, network behavior, or unrelated application capability.
+- AC-03 — use unique test-owned userData/sessionData and restrictive artifact
+  handling; record ownership evidence; sanitize diagnostics; handle early
+  launch cleanup; never use broad deletion or process termination; retain
+  diagnostics and profiles after failed or uncertain cleanup; remove artifacts
+  only after confirmed successful cleanup and distinguish configured from
+  verified state.
+- AC-04 — run the exact-revision typecheck, build, Node/JSDOM, applicable native
+  E2E, and diff checks, record available workflow evidence, and keep native
+  pre-renderer failure as HOLD. Do not add application capability to repair the
+  harness lane.
+- AC-05 — keep physical keyboard and VoiceOver checks separate, recording focus,
+  native control, semantic, status, announcement, duplicate-speech, and empty
+  state evidence. Simulated key events and JSDOM do not substitute for either
+  manual lane.
+- AC-06 — honor the authorized local-only scope and do not access credentials,
+  real accounts, personal profiles, or unrelated data.
+- AC-07 — perform an independent Loop 3 review and leave human merge as a
+  separate decision.
+- AC-08 — preserve primary errors and unrelated branches/files, including the
+  primary checkout `<repository-root>` at
+  `07dc10b47dc2c4def5a86a0e74fbcd50ac607c39` and its unrelated untracked
+  `.github/workflows/ci.yml`; the machine-specific path belongs in run evidence,
+  not committed specification text. Governance PR #1 at
+  `213bcc2640b53c1ab39c26f0aa79b71986a52c31`; duration PR #2 at
+  `472bba8177309b2a56c8d9283532866aa2a11d42`; and session PR #3 at
+  `51b7580ac26b670309425b78bafaa6ad80ed3fb5`. Do not modify or merge those
+  worktrees or PRs, and keep overlapping changes as a separate integration
+  decision. Stop on unauthorized native context or permissions, sandbox denial,
+  unsafe worktree, new dependency/version, signing/OS/global security change,
+  new app network/media/provider/credential capability, major architecture
+  expansion, destructive Git, persistent unresolvable checks, diagnostic
+  stagnation, or merge. Report bounded conclusions rather than implying
+  unavailable native evidence is a pass.
+
+## Evidence and disposition
+
+Evidence distinguishes reference observation, fixture simulation, source
+implementation, automated acceptance, native acceptance, manual accessibility
+QA, historical evidence, current exact-head evidence, inference, and unresolved
+hypotheses.
+
+Root-cause conclusions are bounded as execution-context restriction,
+runtime/artifact compatibility, application/harness defect, or unresolved. The
+existing pre-renderer AppKit/LaunchServices SIGABRT, corrected ASAR-header match,
+disabled integrity fuse, and unresolved development-signature observation are
+not silently collapsed into one conclusion.
+
+## Exclusions and gates
+
+No new dependency or Electron version, provider/network/media capability,
+credential, DRM behavior, signing or security configuration, persistent history,
+or unrelated PR/worktree change is in scope.
+
+GO requires exact provenance, safe profile/process cleanup, complete applicable
+automated verification, and native runtime evidence. Physical keyboard and
+VoiceOver results are reported separately. Missing native or manual evidence is
+HOLD, not a pass. Integration and merge remain separately authorized decisions.

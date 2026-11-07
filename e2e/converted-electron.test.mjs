@@ -1,10 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { _electron as electron } from "playwright-core";
+import {
+  collectRunProvenance,
+  expectedProvenanceFromEnvironment,
+  hashApplicationBuild,
+  orchestrateElectronLaunch,
+  nativeRunScope,
+  createNativeScenarioSelector,
+  validateNativeElectronEnvironment,
+  validateApplicationBuildHash,
+  validateDirectGuiTestInvocation,
+  validateExpectedProvenance,
+} from "./launch-diagnostics.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const electronPackageRoot = path.join(
@@ -25,6 +36,43 @@ const sessionQueueRowsSelector =
   'section[aria-labelledby="session-queue-additions-heading"] tbody tr';
 const completedSessionRowsSelector =
   'section[aria-labelledby="completed-session-heading"] tbody tr';
+const { expected: expectedProvenance, missing: missingExpectedProvenance } = expectedProvenanceFromEnvironment({
+  worktree: repoRoot,
+  executable: electronExecutable,
+  electronVersion: "44.7.0",
+});
+const collectedProvenance = await collectRunProvenance({
+  repoRoot,
+  electronExecutable,
+  baseRef: expectedProvenance.baseRef,
+  electronPackageJson: path.join(electronPackageRoot, "package.json"),
+  playwrightPackageJson: path.join(
+    repoRoot,
+    "node_modules/.pnpm/playwright-core@1.64.1/node_modules/playwright-core/package.json",
+  ),
+});
+const provenanceMismatches = validateExpectedProvenance(collectedProvenance, expectedProvenance);
+let applicationBuild;
+let applicationBuildError;
+try {
+  applicationBuild = await hashApplicationBuild(path.join(repoRoot, "dist"));
+} catch {
+  applicationBuildError = "application build is missing, unreadable, incomplete, or contains unsupported entries";
+}
+const expectedBuildSha256 = process.env.HARBOR_NATIVE_EXPECTED_BUILD_SHA256;
+const provenanceExpectationErrors = [
+  ...missingExpectedProvenance.map((name) => `exact native provenance expectation is missing: ${name}`),
+  ...validateDirectGuiTestInvocation(collectedProvenance),
+  ...provenanceMismatches.map((error) => `exact native provenance mismatch: ${error}`),
+  ...(applicationBuildError ? [applicationBuildError] : []),
+  ...validateApplicationBuildHash(applicationBuild, expectedBuildSha256),
+];
+const runProvenance = {
+  ...collectedProvenance,
+  applicationBuild,
+  status: collectedProvenance.status && provenanceExpectationErrors.length === 0,
+  errors: [...(collectedProvenance.errors ?? []), ...provenanceExpectationErrors],
+};
 
 function isolatedEnvironment() {
   const environment = Object.fromEntries(
@@ -42,132 +90,21 @@ function isolatedEnvironment() {
     delete environment[key];
   }
 
+  const rejectedNames = validateNativeElectronEnvironment(environment);
+  if (rejectedNames.length > 0) {
+    throw new Error(`Native Electron environment policy rejected: ${rejectedNames.join(", ")}`);
+  }
+
   return environment;
 }
 
-function diagnosticsText(diagnostics) {
-  return JSON.stringify(diagnostics, null, 2);
-}
-
-function waitForProcessExit(child, timeout = timeoutMs) {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Electron child process did not exit within ${timeout}ms`));
-    }, timeout);
-
-    child.once("close", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
-
 async function withElectronLaunch(scenario, callback) {
-  const profileRoot = await mkdtemp(path.join(os.tmpdir(), "audfree-electron-e2e-"));
-  const requestedUserDataDir = path.join(profileRoot, "user-data");
-  const artifactsDir = path.join(profileRoot, "artifacts");
-  await mkdir(requestedUserDataDir);
-  const userDataDir = await realpath(requestedUserDataDir);
-
-  const diagnostics = {
-    scenario,
-    profileRoot,
-    userDataDir,
-    artifactsDir,
-    electronConsole: [],
-    pageConsole: [],
-    pageErrors: [],
-    processErrors: [],
-    processExit: undefined,
-  };
-  let electronApp;
-  let page;
-  let child;
-  let passed = false;
-
-  try {
-    electronApp = await electron.launch({
-      executablePath: electronExecutable,
-      args: [`--user-data-dir=${userDataDir}`, repoRoot],
-      artifactsDir,
-      cwd: repoRoot,
-      env: isolatedEnvironment(),
-      timeout: timeoutMs,
-    });
-    child = electronApp.process();
-    child.on("error", (error) => {
-      diagnostics.processErrors.push(error.stack ?? error.message);
-    });
-    child.on("exit", (code, signal) => {
-      diagnostics.processExit = { code, signal };
-    });
-    if (child.stderr) {
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk) => {
-        diagnostics.processErrors.push(String(chunk));
-      });
-    }
-
-    electronApp.on("console", (message) => {
-      diagnostics.electronConsole.push(`${message.type()}: ${message.text()}`);
-    });
-
-    page = await electronApp.firstWindow({ timeout: timeoutMs });
-    page.setDefaultTimeout(timeoutMs);
-    page.on("console", (message) => {
-      diagnostics.pageConsole.push(`${message.type()}: ${message.text()}`);
-    });
-    page.on("pageerror", (error) => {
-      diagnostics.pageErrors.push(error.stack ?? error.message);
-    });
-
-    const runtimePaths = await electronApp.evaluate(({ app }) => ({
-      userData: app.getPath("userData"),
-      sessionData: app.getPath("sessionData"),
-    }));
-    assert.equal(
-      runtimePaths.userData,
-      userDataDir,
-      "Electron userData must resolve to the prelaunch isolated directory",
-    );
-    assert.equal(
-      runtimePaths.sessionData,
-      userDataDir,
-      "Electron sessionData must remain inside the prelaunch isolated userData directory",
-    );
-
-    await callback({ electronApp, page });
-
-    passed = true;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`${message}\nElectron E2E diagnostics:\n${diagnosticsText(diagnostics)}`, {
-      cause: error,
-    });
-  } finally {
-    if (electronApp) {
-      try {
-        await electronApp.close();
-      } finally {
-        if (child && child.exitCode === null && child.signalCode === null) {
-          try {
-            await waitForProcessExit(child);
-          } catch (error) {
-            if (!passed) {
-              diagnostics.processErrors.push(error instanceof Error ? error.message : String(error));
-            }
-            if (child.exitCode === null && child.signalCode === null) child.kill();
-            throw error;
-          }
-        }
-        if (child && child.exitCode === null && child.signalCode === null) child.kill();
-      }
-    }
-
-    if (passed) await rm(profileRoot, { recursive: true, force: true });
-  }
+  return orchestrateElectronLaunch({
+    scenario, callback, repoRoot, electronExecutable, expectedBuildSha256, runProvenance,
+    scenarioSelection: process.env.HARBOR_NATIVE_SCENARIO,
+    tmpRoot: os.tmpdir(), timeoutMs, isolatedEnvironment,
+    launch: (options) => electron.launch(options),
+  });
 }
 
 async function openConverted(page) {
@@ -342,8 +279,19 @@ async function clearSort(page) {
   await page.getByRole("button", { name: "Clear sort", exact: true }).click();
 }
 
+const nativeScenarioSelector = createNativeScenarioSelector(process.env.HARBOR_NATIVE_SCENARIO);
+
+async function runScenario(t, name, callback) {
+  const selection = nativeScenarioSelector.select(name);
+  if (selection.selected) return t.test(name, callback);
+  return t.test(name, { skip: selection.skipReason }, callback);
+}
+
 test("Converted Slice 1 functional Electron acceptance", async (t) => {
-  await t.test("Converted Electron vertical slice survives three isolated launches", async () => {
+  if (nativeRunScope(runProvenance.invocation.contract, process.env.HARBOR_NATIVE_SCENARIO) !== "full-suite-candidate") {
+    t.diagnostic("FOCUSED DIAGNOSTIC ONLY: this run does not establish full native suite acceptance");
+  }
+  await runScenario(t, "Converted Electron vertical slice survives three isolated launches", async () => {
     for (const attempt of [1, 2, 3]) {
       await withElectronLaunch(`artist-baseline-${attempt}`, async ({ page }) => {
         const resultRows = await openConverted(page);
@@ -361,7 +309,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     }
   });
 
-  await t.test("filters Converted rows by Album with a conditional selector", async () => {
+  await runScenario(t, "filters Converted rows by Album with a conditional selector", async () => {
     await withElectronLaunch("album-filtering", async ({ page }) => {
       const resultRows = await openConverted(page);
       const albumSelect = await selectConvertedDimension(page, "Album");
@@ -376,7 +324,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("sorts Converted rows by each visible column and clears back to source order", async () => {
+  await runScenario(t, "sorts Converted rows by each visible column and clears back to source order", async () => {
     await withElectronLaunch("sorting-order-and-clear", async ({ page }) => {
       const resultRows = await openConverted(page);
       await assertConvertedResults(page, resultRows, [
@@ -439,7 +387,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("orders Artist and Album options alphabetically with inclusive defaults", async () => {
+  await runScenario(t, "orders Artist and Album options alphabetically with inclusive defaults", async () => {
     await withElectronLaunch("selector-ordering", async ({ page }) => {
       await openConverted(page);
       const dimension = page.getByLabel("Filter by", { exact: true });
@@ -464,7 +412,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("matches Search queries and exposes contextual no-results recovery", async () => {
+  await runScenario(t, "matches Search queries and exposes contextual no-results recovery", async () => {
     await withElectronLaunch("search-empty-state", async ({ page }) => {
       const resultRows = await openConverted(page);
       const search = await setSearch(page, "shared");
@@ -490,7 +438,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("composes Search with active Artist and Album filters", async () => {
+  await runScenario(t, "composes Search with active Artist and Album filters", async () => {
     await withElectronLaunch("search-composition", async ({ page }) => {
       const resultRows = await openConverted(page);
       await selectConvertedDimension(page, "Artist");
@@ -515,7 +463,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("preserves Artist and Album selections across navigation", async () => {
+  await runScenario(t, "preserves Artist and Album selections across navigation", async () => {
     await withElectronLaunch("navigation-preservation", async ({ page }) => {
       const resultRows = await openConverted(page);
       await selectConvertedDimension(page, "Artist");
@@ -542,7 +490,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("composes sorting with filters and Search across navigation", async () => {
+  await runScenario(t, "composes sorting with filters and Search across navigation", async () => {
     await withElectronLaunch("sorting-composition-navigation", async ({ page }) => {
       const resultRows = await openConverted(page);
       await selectConvertedDimension(page, "Artist");
@@ -569,7 +517,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("resets Converted sorting on a fresh isolated launch", async () => {
+  await runScenario(t, "resets Converted sorting on a fresh isolated launch", async () => {
     await withElectronLaunch("sorting-reset-first-launch", async ({ page }) => {
       const resultRows = await openConverted(page);
       await sortBy(page, "Title", "ascending");
@@ -595,7 +543,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("keeps Converting status controls separate from Converted filters", async () => {
+  await runScenario(t, "keeps Converting status controls separate from Converted filters", async () => {
     await withElectronLaunch("view-control-separation", async ({ page }) => {
       await openConverted(page);
       await page.getByLabel("Filter by", { exact: true }).waitFor({ state: "visible" });
@@ -620,7 +568,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("adds Browser sources to the isolated session queue by keyboard and resets on a fresh launch", async () => {
+  await runScenario(t, "adds Browser sources to the isolated session queue by keyboard and resets on a fresh launch", async () => {
     await withElectronLaunch("browser-session-queue", async ({ page }) => {
       const aurora = page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true });
       const blueHour = page.getByRole("button", { name: "Add Blue Hour to session queue", exact: true });
@@ -675,7 +623,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("connects session completion to Converted while preserving native focus and identity", async () => {
+  await runScenario(t, "connects session completion to Converted while preserving native focus and identity", async () => {
     await withElectronLaunch("session-queue-lifecycle", async ({ page }) => {
       const session = page.locator('section[aria-labelledby="session-queue-additions-heading"]');
       await page.getByRole("button", { name: "Add Aurora Lines to session queue", exact: true }).press("Enter");
@@ -740,7 +688,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("advances the isolated Demo lifecycle by keyboard and resets on a fresh launch", async () => {
+  await runScenario(t, "advances the isolated Demo lifecycle by keyboard and resets on a fresh launch", async () => {
     await withElectronLaunch("lifecycle-demo-keyboard", async ({ page }) => {
       await page.getByRole("button", { name: "Converting", exact: true }).click();
       await page.getByRole("heading", { name: "Demo lifecycle", exact: true }).waitFor({ state: "visible" });
@@ -806,7 +754,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
   });
 
   if (process.env.HARBOR_RUN_NATIVE_SELECT_DIAGNOSTICS === "1") {
-  await t.test("diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions", async () => {
+  await runScenario(t, "diagnoses native Converted dimension activation paths without cross-platform keyboard assumptions", async () => {
     const arrowDiagnostics = await runConvertedDimensionDiagnostic(
       "dimension-arrow-down-enter",
       async ({ page }) => {
@@ -839,7 +787,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
   });
   }
 
-  await t.test("preserves keyboard traversal and Search recovery after controlled Artist setup", async () => {
+  await runScenario(t, "preserves keyboard traversal and Search recovery after controlled Artist setup", async () => {
     await withElectronLaunch("keyboard-navigation-and-search", async ({ page }) => {
       const resultRows = await openConvertedWithKeyboard(page);
       const dimension = page.getByLabel("Filter by", { exact: true });
@@ -880,7 +828,7 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
     });
   });
 
-  await t.test("supports keyboard sorting and clear-sort recovery without changing selection", async () => {
+  await runScenario(t, "supports keyboard sorting and clear-sort recovery without changing selection", async () => {
     await withElectronLaunch("keyboard-sorting-and-clear", async ({ page }) => {
       const resultRows = await openConvertedWithKeyboard(page);
       const dimension = page.getByLabel("Filter by", { exact: true });
@@ -904,4 +852,6 @@ test("Converted Slice 1 functional Electron acceptance", async (t) => {
       assert.equal(await page.locator("#app").getAttribute("aria-live"), null);
     });
   });
+
+  nativeScenarioSelector.assertMatched();
 });
