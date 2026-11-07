@@ -295,6 +295,13 @@ export function validateApplicationBuildHash(build, expected) {
   return [];
 }
 
+export function nativeRunScope(contract, selectedScenario) {
+  if (!contract?.valid || selectedScenario !== undefined || contract.testNamePatterns?.length
+    || contract.testSkipPatterns?.length || contract.testOnly || contract.testShard
+    || contract.testRerunFailures) return "focused-diagnostic";
+  return "full-suite-candidate";
+}
+
 function firstMatch(value, pattern) {
   return value?.match(pattern)?.[1];
 }

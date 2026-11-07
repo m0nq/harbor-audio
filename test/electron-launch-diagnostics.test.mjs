@@ -18,6 +18,7 @@ import {
   finalizeDiagnostics,
   expectedProvenanceFromEnvironment,
   hashApplicationBuild,
+  nativeRunScope,
   launchProcessDiagnostics,
   nodeTestInvocationContract,
   resolveNodeTestWorkerContext,
@@ -512,6 +513,18 @@ test("hashes the complete application build and rejects symlinks", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("classifies every Node selection control as diagnostic", () => {
+  const base = [process.execPath, "--test", "--test-isolation=none"];
+  const file = "/approved/test.mjs";
+  const contract = (options = []) => nodeTestInvocationContract([...base, ...options, file], { context: "main-process" });
+  assert.equal(nativeRunScope(contract(), undefined), "full-suite-candidate");
+  for (const options of [["--test-name-pattern=x"], ["--test-skip-pattern=x"], ["--test-only"], ["--test-shard=1/2"], ["--test-rerun-failures=x"]]) {
+    assert.equal(nativeRunScope(contract(options), undefined), "focused-diagnostic", options.join(" "));
+  }
+  assert.equal(nativeRunScope(contract(), "Album"), "focused-diagnostic");
+  assert.equal(nativeRunScope({}, undefined), "focused-diagnostic");
 });
 
 test("requires direct non-isolated GUI runner provenance", () => {

@@ -87,9 +87,8 @@ pnpm test
 
 Run the isolated Electron E2E suite from a macOS desktop session:
 
-```zsh
-/opt/homebrew/bin/node --test e2e/converted-electron.test.mjs
-```
+Use the gated procedure below; a bare `node --test` invocation lacks the
+required provenance expectations and is not an acceptance command.
 
 From an authorized physical macOS Aqua/Terminal session, run the bounded
 version probe before the full GUI suite:
@@ -150,9 +149,11 @@ exact-SHA worktree. Compute it from that worktree using:
 ```
 
 Record the build command, result, clean status, SHA and digest in the evidence.
-The digest matches the bytes subsequently checked at launch; it does not by
-itself prove which source revision produced those bytes. Missing, incomplete,
-symlinked, unreadable or mismatched build output stops the GUI run.
+The digest is rechecked before each launch and after each successful scenario;
+it does not by itself prove which source revision produced those bytes or rule
+out concurrent changes between checks. Missing, symlinked, unreadable or
+mismatched build output stops the GUI run. A successful fresh build and its
+complete output inventory remain required acceptance evidence.
 Node's isolated test worker may add runtime defaults to `process.execArgv`; the
 harness retains that raw worker invocation for diagnostics but validates the
 stable contract separately: executable, test files, selection patterns,

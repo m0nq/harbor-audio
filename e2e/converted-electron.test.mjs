@@ -11,6 +11,7 @@ import {
   expectedProvenanceFromEnvironment,
   finalizeDiagnostics,
   hashApplicationBuild,
+  nativeRunScope,
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
   createBoundedDiagnosticsCapture,
@@ -113,7 +114,7 @@ async function withElectronLaunch(scenario, callback) {
 
   const diagnostics = {
     scenario,
-    runScope: process.env.HARBOR_NATIVE_SCENARIO === undefined ? "full-suite" : "focused-diagnostic",
+    runScope: nativeRunScope(runProvenance.invocation.contract, process.env.HARBOR_NATIVE_SCENARIO),
     provenance: runProvenance,
     profileRoot,
     userDataDir,
@@ -181,6 +182,12 @@ async function withElectronLaunch(scenario, callback) {
       diagnostics.startupPhase = "environment-gate";
       diagnostics.disposition = "HOLD";
       throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
+    }
+    diagnostics.preLaunchBuild = await hashApplicationBuild(path.join(repoRoot, "dist"));
+    if (validateApplicationBuildHash(diagnostics.preLaunchBuild, expectedBuildSha256).length) {
+      diagnostics.startupPhase = "provenance-gate";
+      diagnostics.disposition = "HOLD";
+      throw new Error("Application build changed before launch");
     }
     const electronEnvironment = isolatedEnvironment();
     diagnostics.startupPhase = "electron-launch";
@@ -261,6 +268,11 @@ async function withElectronLaunch(scenario, callback) {
     );
 
     await callback({ electronApp, page });
+
+    diagnostics.postScenarioBuild = await hashApplicationBuild(path.join(repoRoot, "dist"));
+    if (validateApplicationBuildHash(diagnostics.postScenarioBuild, expectedBuildSha256).length) {
+      throw new Error("Application build changed during scenario");
+    }
 
     passed = true;
     diagnostics.startupPhase = "application-workflow";
@@ -492,7 +504,7 @@ async function runScenario(t, name, callback) {
 }
 
 test("Converted Slice 1 functional Electron acceptance", async (t) => {
-  if (process.env.HARBOR_NATIVE_SCENARIO !== undefined) {
+  if (nativeRunScope(runProvenance.invocation.contract, process.env.HARBOR_NATIVE_SCENARIO) !== "full-suite-candidate") {
     t.diagnostic("FOCUSED DIAGNOSTIC ONLY: this run does not establish full native suite acceptance");
   }
   await runScenario(t, "Converted Electron vertical slice survives three isolated launches", async () => {
