@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile as defaultExecFile } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { mkdir as defaultMkdir, mkdtemp as defaultMkdtemp, readFile as defaultReadFile, realpath as defaultRealpath, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
+import { lstat, mkdir as defaultMkdir, mkdtemp as defaultMkdtemp, readdir, readFile as defaultReadFile, realpath as defaultRealpath, rm as defaultRm, writeFile as defaultWriteFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -264,6 +264,35 @@ export async function resolveNodeTestWorkerContext({
 
 function sha256(buffer) {
   return createHash("sha256").update(buffer).digest("hex");
+}
+
+/** Hash the complete generated application tree, including paths, without following symlinks. */
+export async function hashApplicationBuild(buildRoot) {
+  const records = [];
+  async function visit(relativePath) {
+    const absolutePath = path.join(buildRoot, relativePath);
+    const info = await lstat(absolutePath);
+    if (info.isSymbolicLink()) throw new Error("application build contains a symbolic link");
+    if (info.isDirectory()) {
+      const entries = await readdir(absolutePath);
+      for (const entry of entries.sort()) await visit(path.join(relativePath, entry));
+    } else if (info.isFile()) {
+      records.push([relativePath.split(path.sep).join("/"), sha256(await defaultReadFile(absolutePath))]);
+    } else {
+      throw new Error("application build contains an unsupported entry");
+    }
+  }
+  await visit("");
+  if (!records.some(([name]) => name === "main.js") || !records.some(([name]) => name === "renderer/index.html")) {
+    throw new Error("application build is incomplete");
+  }
+  return { sha256: sha256(JSON.stringify(records)), files: records };
+}
+
+export function validateApplicationBuildHash(build, expected) {
+  if (!/^[a-f0-9]{64}$/i.test(expected ?? "")) return ["expected application build SHA-256 is missing or malformed"];
+  if (!build || build.sha256 !== expected) return ["application build SHA-256 does not match the expected build"];
+  return [];
 }
 
 function firstMatch(value, pattern) {

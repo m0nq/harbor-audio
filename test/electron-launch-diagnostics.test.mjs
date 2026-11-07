@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -17,10 +17,12 @@ import {
   diagnosticsText,
   finalizeDiagnostics,
   expectedProvenanceFromEnvironment,
+  hashApplicationBuild,
   launchProcessDiagnostics,
   nodeTestInvocationContract,
   resolveNodeTestWorkerContext,
   validateDirectGuiTestInvocation,
+  validateApplicationBuildHash,
   persistDiagnostics,
   prepareIsolatedElectronProfile,
   recordProcessError,
@@ -491,6 +493,27 @@ test("captures a Node test-worker invocation and validates its stable contract",
   }
 });
 
+test("hashes the complete application build and rejects symlinks", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "harbor-build-hash-"));
+  try {
+    await mkdir(path.join(root, "renderer"));
+    await writeFile(path.join(root, "main.js"), "main");
+    await writeFile(path.join(root, "renderer", "index.html"), "html");
+    const first = await hashApplicationBuild(root);
+    assert.match(first.sha256, /^[0-9a-f]{64}$/);
+    assert.deepEqual(validateApplicationBuildHash(first, first.sha256), []);
+    assert.notDeepEqual(validateApplicationBuildHash(first, undefined), []);
+    await writeFile(path.join(root, "renderer", "index.html"), "changed");
+    const changed = await hashApplicationBuild(root);
+    assert.notEqual(changed.sha256, first.sha256);
+    assert.notDeepEqual(validateApplicationBuildHash(changed, first.sha256), []);
+    await symlink(path.join(root, "main.js"), path.join(root, "alias"));
+    await assert.rejects(hashApplicationBuild(root), /symbolic link/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("requires direct non-isolated GUI runner provenance", () => {
   const executable = process.execPath;
   const file = "/approved/test.mjs";
@@ -636,6 +659,7 @@ test("applies native scenario selection at the nested Node test boundary", () =>
   assert.equal(focused.status, 1, focused.output);
   assert.match(focused.output, /skipped 14/);
   assert.match(focused.output, /filters Converted rows by Album with a conditional selector/);
+  assert.match(focused.output, /FOCUSED DIAGNOSTIC ONLY/);
   assert.match(focused.output, /Native run provenance is incomplete; refusing Electron launch/);
 
   const unknown = runSelection("does-not-exist");

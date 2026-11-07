@@ -10,6 +10,7 @@ import {
   errorDiagnostics,
   expectedProvenanceFromEnvironment,
   finalizeDiagnostics,
+  hashApplicationBuild,
   launchProcessDiagnostics,
   MAX_CAPTURED_STREAM_BYTES,
   createBoundedDiagnosticsCapture,
@@ -18,6 +19,7 @@ import {
   recordProcessError,
   utf8Prefix,
   validateNativeElectronEnvironment,
+  validateApplicationBuildHash,
   validateDirectGuiTestInvocation,
   validateExpectedProvenance,
   waitForPostCloseSettlement,
@@ -58,13 +60,24 @@ const collectedProvenance = await collectRunProvenance({
   ),
 });
 const provenanceMismatches = validateExpectedProvenance(collectedProvenance, expectedProvenance);
+let applicationBuild;
+let applicationBuildError;
+try {
+  applicationBuild = await hashApplicationBuild(path.join(repoRoot, "dist"));
+} catch {
+  applicationBuildError = "application build is missing, unreadable, incomplete, or contains unsupported entries";
+}
+const expectedBuildSha256 = process.env.HARBOR_NATIVE_EXPECTED_BUILD_SHA256;
 const provenanceExpectationErrors = [
   ...missingExpectedProvenance.map((name) => `exact native provenance expectation is missing: ${name}`),
   ...validateDirectGuiTestInvocation(collectedProvenance),
   ...provenanceMismatches.map((error) => `exact native provenance mismatch: ${error}`),
+  ...(applicationBuildError ? [applicationBuildError] : []),
+  ...validateApplicationBuildHash(applicationBuild, expectedBuildSha256),
 ];
 const runProvenance = {
   ...collectedProvenance,
+  applicationBuild,
   status: collectedProvenance.status && provenanceExpectationErrors.length === 0,
   errors: [...(collectedProvenance.errors ?? []), ...provenanceExpectationErrors],
 };
@@ -100,6 +113,7 @@ async function withElectronLaunch(scenario, callback) {
 
   const diagnostics = {
     scenario,
+    runScope: process.env.HARBOR_NATIVE_SCENARIO === undefined ? "full-suite" : "focused-diagnostic",
     provenance: runProvenance,
     profileRoot,
     userDataDir,
@@ -478,6 +492,9 @@ async function runScenario(t, name, callback) {
 }
 
 test("Converted Slice 1 functional Electron acceptance", async (t) => {
+  if (process.env.HARBOR_NATIVE_SCENARIO !== undefined) {
+    t.diagnostic("FOCUSED DIAGNOSTIC ONLY: this run does not establish full native suite acceptance");
+  }
   await runScenario(t, "Converted Electron vertical slice survives three isolated launches", async () => {
     for (const attempt of [1, 2, 3]) {
       await withElectronLaunch(`artist-baseline-${attempt}`, async ({ page }) => {

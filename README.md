@@ -113,7 +113,7 @@ env \
   HARBOR_NATIVE_EXPECTED_PACKAGE_SHA256='<approved-package-json-sha256>' \
   HARBOR_NATIVE_EXPECTED_LOCKFILE_SHA256='<approved-lockfile-sha256>' \
   HARBOR_NATIVE_EXPECTED_BRANCH_STATUS='## <approved-branch-status>' \
-  HARBOR_NATIVE_EXPECTED_INVOCATION='["/opt/homebrew/bin/node","<approved-worktree-path>/e2e/native-version-probe.mjs"]' \
+  HARBOR_NATIVE_EXPECTED_INVOCATION='["<physical-node-path>","<approved-worktree-path>/e2e/native-version-probe.mjs"]' \
   /opt/homebrew/bin/node e2e/native-version-probe.mjs
 ```
 
@@ -134,8 +134,25 @@ gate can validate the test runner's directly observed invocation. An isolated
 worker or unverified context is rejected before Electron launch. The suite
 must use the same exact provenance values but set
 `HARBOR_NATIVE_EXPECTED_INVOCATION` to the operator's command, for example
-`["/opt/homebrew/bin/node","--test","--test-isolation=none","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
-Replace `<approved-worktree-path>` with the exact canonical worktree path.
+`["<physical-node-path>","--test","--test-isolation=none","<approved-worktree-path>/e2e/converted-electron.test.mjs"]`.
+Replace `<physical-node-path>` with the independently verified physical Node
+executable path (`process.execPath`), and `<approved-worktree-path>` with the
+exact canonical worktree path. A focused `HARBOR_NATIVE_SCENARIO` run is a
+diagnostic, not full-suite acceptance; inspect the test counts and skipped
+scenarios before recording any result.
+
+For GUI runs, set `HARBOR_NATIVE_EXPECTED_BUILD_SHA256` to the independently
+recorded digest of `dist/` after a successful fresh build in the clean,
+exact-SHA worktree. Compute it from that worktree using:
+
+```zsh
+/opt/homebrew/bin/node --input-type=module -e 'import { hashApplicationBuild } from "./e2e/launch-diagnostics.mjs"; console.log((await hashApplicationBuild("dist")).sha256)'
+```
+
+Record the build command, result, clean status, SHA and digest in the evidence.
+The digest matches the bytes subsequently checked at launch; it does not by
+itself prove which source revision produced those bytes. Missing, incomplete,
+symlinked, unreadable or mismatched build output stops the GUI run.
 Node's isolated test worker may add runtime defaults to `process.execArgv`; the
 harness retains that raw worker invocation for diagnostics but validates the
 stable contract separately: executable, test files, selection patterns,
