@@ -5,26 +5,16 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { _electron as electron } from "playwright-core";
 import {
-  buildFailureError,
   collectRunProvenance,
-  errorDiagnostics,
   expectedProvenanceFromEnvironment,
-  finalizeDiagnostics,
   hashApplicationBuild,
+  orchestrateElectronLaunch,
   nativeRunScope,
-  requireApplicationBuildHash,
-  launchProcessDiagnostics,
-  MAX_CAPTURED_STREAM_BYTES,
-  createBoundedDiagnosticsCapture,
   createNativeScenarioSelector,
-  prepareIsolatedElectronProfile,
-  recordProcessError,
-  utf8Prefix,
   validateNativeElectronEnvironment,
   validateApplicationBuildHash,
   validateDirectGuiTestInvocation,
   validateExpectedProvenance,
-  waitForPostCloseSettlement,
 } from "./launch-diagnostics.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -109,217 +99,12 @@ function isolatedEnvironment() {
 }
 
 async function withElectronLaunch(scenario, callback) {
-  const { profileRoot, artifactsDir, userDataDir } = await prepareIsolatedElectronProfile({
-    tmpRoot: os.tmpdir(),
+  return orchestrateElectronLaunch({
+    scenario, callback, repoRoot, electronExecutable, expectedBuildSha256, runProvenance,
+    scenarioSelection: process.env.HARBOR_NATIVE_SCENARIO,
+    tmpRoot: os.tmpdir(), timeoutMs, isolatedEnvironment,
+    launch: (options) => electron.launch(options),
   });
-
-  const diagnostics = {
-    scenario,
-    runScope: nativeRunScope(runProvenance.invocation.contract, process.env.HARBOR_NATIVE_SCENARIO),
-    provenance: runProvenance,
-    profileRoot,
-    userDataDir,
-    artifactsDir,
-    electronConsole: [],
-    pageConsole: [],
-    pageErrors: [],
-    processErrors: [],
-    processFailure: false,
-    processExit: undefined,
-    launchError: undefined,
-    startupPhase: "prelaunch",
-    disposition: "UNDETERMINED",
-    cleanup: {
-      ownership: "not-established",
-      ownershipSource: "none",
-      closeRequested: false,
-      directChildPid: undefined,
-      launchProcess: undefined,
-      killAttempted: false,
-      verifiedExit: false,
-      closeObserved: false,
-    },
-  };
-  let electronApp;
-  let page;
-  let child;
-  let passed = false;
-  let primaryError;
-  let stderrBytes = 0;
-  let stderrTruncated = false;
-  const listenerDisposers = [];
-  const listen = (target, event, handler, { retain = false } = {}) => {
-    target.on(event, handler);
-    if (!retain) listenerDisposers.push(() => target.removeListener?.(event, handler));
-  };
-  const markProcessFailure = (error) => {
-    recordProcessError(diagnostics, error);
-    diagnostics.processFailure = true;
-    primaryError ??= error;
-    passed = false;
-    diagnostics.disposition = "FAILURE";
-  };
-  const electronConsoleCapture = createBoundedDiagnosticsCapture("Electron console", {
-    onTruncate: markProcessFailure,
-  });
-  const pageConsoleCapture = createBoundedDiagnosticsCapture("Page console", {
-    onTruncate: markProcessFailure,
-  });
-  const pageErrorCapture = createBoundedDiagnosticsCapture("Page error", {
-    onTruncate: markProcessFailure,
-  });
-  diagnostics.electronConsole = electronConsoleCapture.values;
-  diagnostics.pageConsole = pageConsoleCapture.values;
-  diagnostics.pageErrors = pageErrorCapture.values;
-
-  try {
-    if (!runProvenance.status) {
-      diagnostics.startupPhase = "provenance-gate";
-      diagnostics.disposition = "HOLD";
-      throw new Error("Native run provenance is incomplete; refusing Electron launch");
-    }
-    const rejectedEnvironmentNames = validateNativeElectronEnvironment();
-    if (rejectedEnvironmentNames.length > 0) {
-      diagnostics.startupPhase = "environment-gate";
-      diagnostics.disposition = "HOLD";
-      throw new Error(`Native Electron environment policy rejected: ${rejectedEnvironmentNames.join(", ")}`);
-    }
-    try {
-      diagnostics.preLaunchBuild = await requireApplicationBuildHash(path.join(repoRoot, "dist"), expectedBuildSha256);
-    } catch (error) {
-      diagnostics.startupPhase = "provenance-gate";
-      diagnostics.disposition = "HOLD";
-      throw new Error("Application build could not be verified before launch", { cause: error });
-    }
-    const electronEnvironment = isolatedEnvironment();
-    diagnostics.startupPhase = "electron-launch";
-    electronApp = await electron.launch({
-      executablePath: electronExecutable,
-      args: [`--user-data-dir=${userDataDir}`, repoRoot],
-      artifactsDir,
-      cwd: repoRoot,
-      env: electronEnvironment,
-      timeout: timeoutMs,
-    });
-    diagnostics.startupPhase = "electron-started";
-    child = electronApp.process();
-    diagnostics.cleanup.directChildPid = child.pid;
-    diagnostics.cleanup.ownership = "playwright-child-handle";
-    diagnostics.cleanup.ownershipSource = "electronApp.process()";
-    listen(child, "error", (error) => {
-      markProcessFailure(error);
-    }, { retain: true });
-    listen(child, "exit", (code, signal) => {
-      diagnostics.processExit = { code, signal };
-    });
-    listen(child, "close", () => {
-      diagnostics.cleanup.closeObserved = true;
-    });
-    if (child.stderr) {
-      child.stderr.setEncoding("utf8");
-      listen(child.stderr, "data", (chunk) => {
-        if (stderrTruncated) return;
-        const text = String(chunk);
-        const bytes = Buffer.byteLength(text, "utf8");
-        const remaining = MAX_CAPTURED_STREAM_BYTES - stderrBytes;
-        if (bytes <= remaining) {
-          diagnostics.processErrors.push(text);
-          stderrBytes += bytes;
-          return;
-        }
-        if (remaining > 0) {
-          const retained = utf8Prefix(text, remaining);
-          diagnostics.processErrors.push(retained);
-          stderrBytes += Buffer.byteLength(retained, "utf8");
-        }
-        stderrTruncated = true;
-        markProcessFailure(new Error(`Electron stderr capture exceeded ${MAX_CAPTURED_STREAM_BYTES} bytes; output truncated`));
-      });
-      listen(child.stderr, "error", (error) => {
-        markProcessFailure(error);
-      }, { retain: true });
-    }
-
-    listen(electronApp, "console", (message) => {
-      electronConsoleCapture.append(`${message.type()}: ${message.text()}`);
-    });
-
-    page = await electronApp.firstWindow({ timeout: timeoutMs });
-    diagnostics.startupPhase = "renderer-started";
-    page.setDefaultTimeout(timeoutMs);
-    listen(page, "console", (message) => {
-      pageConsoleCapture.append(`${message.type()}: ${message.text()}`);
-    });
-    listen(page, "pageerror", (error) => {
-      pageErrorCapture.append(error.stack ?? error.message);
-    });
-
-    const runtimePaths = await electronApp.evaluate(({ app }) => ({
-      userData: app.getPath("userData"),
-      sessionData: app.getPath("sessionData"),
-    }));
-    assert.equal(
-      runtimePaths.userData,
-      userDataDir,
-      "Electron userData must resolve to the prelaunch isolated directory",
-    );
-    assert.equal(
-      runtimePaths.sessionData,
-      userDataDir,
-      "Electron sessionData must remain inside the prelaunch isolated userData directory",
-    );
-
-    await callback({ electronApp, page });
-
-    diagnostics.postScenarioBuild = await requireApplicationBuildHash(path.join(repoRoot, "dist"), expectedBuildSha256);
-
-    passed = true;
-    diagnostics.startupPhase = "application-workflow";
-    diagnostics.disposition = "PASS";
-  } catch (error) {
-    primaryError ??= error;
-    diagnostics.launchError = errorDiagnostics(error);
-    diagnostics.cleanup.launchProcess = launchProcessDiagnostics(error);
-    if (!electronApp) {
-      if (diagnostics.disposition === "UNDETERMINED") diagnostics.disposition = "HOLD";
-      if (diagnostics.startupPhase === "electron-launch") diagnostics.startupPhase = "pre-renderer-launch";
-      if (diagnostics.startupPhase === "provenance-gate") {
-        diagnostics.cleanup.ownership = "not-established";
-        diagnostics.cleanup.ownershipSource = "provenance-gate";
-      } else {
-        diagnostics.cleanup.ownership = diagnostics.cleanup.launchProcess.ownership;
-        diagnostics.cleanup.ownershipSource = "playwright-error-log";
-      }
-    } else if (!page) {
-      diagnostics.disposition = "HOLD";
-      diagnostics.startupPhase = "renderer-startup";
-    } else {
-      diagnostics.disposition = "FAILURE";
-      diagnostics.startupPhase = "application-workflow";
-    }
-  } finally {
-    let finalization;
-    try {
-      finalization = await finalizeDiagnostics({
-        diagnostics,
-        electronApp,
-        child,
-        passed,
-        profileRoot,
-        timeout: timeoutMs,
-        settleAfterClose: () => waitForPostCloseSettlement(),
-      });
-    } finally {
-      for (const dispose of listenerDisposers.splice(0).reverse()) dispose();
-    }
-    const finalError = buildFailureError({
-      primaryError,
-      diagnosticsPath: finalization.diagnosticsPath,
-      cleanupErrors: finalization.cleanupErrors,
-      persistenceError: finalization.persistenceError,
-    });
-    if (finalError) throw finalError;
-  }
 }
 
 async function openConverted(page) {

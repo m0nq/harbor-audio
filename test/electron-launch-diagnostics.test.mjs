@@ -19,6 +19,7 @@ import {
   expectedProvenanceFromEnvironment,
   hashApplicationBuild,
   nativeRunScope,
+  orchestrateElectronLaunch,
   requireApplicationBuildHash,
   launchProcessDiagnostics,
   nodeTestInvocationContract,
@@ -522,8 +523,89 @@ test("refuses changed or unreadable builds on repeated boundary checks", async (
   const hash = async () => current;
   assert.equal(await requireApplicationBuildHash("/build", expected, hash), current);
   current = { sha256: "b".repeat(64) };
-  await assert.rejects(requireApplicationBuildHash("/build", expected, hash), /does not match/);
+  await assert.rejects(requireApplicationBuildHash("/build", expected, hash), (error) => {
+    assert.match(error.message, /does not match/);
+    assert.equal(error.observedBuild, current);
+    return true;
+  });
   await assert.rejects(requireApplicationBuildHash("/build", expected, async () => { throw new Error("unreadable"); }), /unreadable/);
+});
+
+test("launch orchestration fails closed on changed and unreadable prelaunch builds", async () => {
+  const expected = "a".repeat(64);
+  const changed = { sha256: "b".repeat(64) };
+  for (const [label, hashBuild] of [
+    ["changed", async () => changed],
+    ["unreadable", async () => { throw new Error("build unreadable; token=private-value"); }],
+  ]) {
+    let launches = 0;
+    let removals = 0;
+    let persisted;
+    await assert.rejects(orchestrateElectronLaunch({
+      scenario: label, callback: async () => assert.fail("scenario must not run"),
+      repoRoot: "/fixture", electronExecutable: "/electron", expectedBuildSha256: expected,
+      runProvenance: { status: true, invocation: { contract: {} } },
+      tmpRoot: "/tmp", timeoutMs: 100, isolatedEnvironment: () => ({}),
+      prepareProfile: async () => ({ profileRoot: "/profile", artifactsDir: "/artifacts", userDataDir: "/profile/user" }),
+      launch: async () => { launches++; }, hashBuild,
+      finalizationOptions: {
+        persist: async (diagnostics) => { persisted = JSON.parse(diagnosticsText(diagnostics)); return "/diagnostics.json"; },
+        removeProfile: async () => { removals++; },
+      },
+    }), /could not be verified before launch/);
+    assert.equal(launches, 0, label);
+    assert.equal(removals, 0, label);
+    assert.equal(persisted.disposition, "HOLD", label);
+    assert.equal(persisted.startupPhase, "provenance-gate", label);
+    if (label === "changed") {
+      assert.deepEqual(persisted.preLaunchBuild, changed);
+      assert.match(persisted.buildVerificationError.message, /does not match/);
+    } else {
+      assert.match(persisted.buildVerificationError.message, /build unreadable; token=\[REDACTED\]/);
+      assert.doesNotMatch(JSON.stringify(persisted), /private-value/);
+    }
+  }
+});
+
+test("launch orchestration retains failure diagnostics and profile after post-scenario build mismatch", async () => {
+  const expected = "a".repeat(64);
+  const changed = { sha256: "b".repeat(64) };
+  const child = new EventEmitter();
+  Object.assign(child, { pid: 123, exitCode: null, signalCode: null });
+  const page = new EventEmitter();
+  page.setDefaultTimeout = () => {};
+  const app = new EventEmitter();
+  app.process = () => child;
+  app.firstWindow = async () => page;
+  app.evaluate = async () => ({ userData: "/profile/user", sessionData: "/profile/user" });
+  app.close = async () => { child.exitCode = 0; child.emit("close"); };
+  let hashes = 0;
+  let launches = 0;
+  let scenarios = 0;
+  let removals = 0;
+  let persisted;
+  await assert.rejects(orchestrateElectronLaunch({
+    scenario: "post-mismatch", callback: async () => { scenarios++; },
+    repoRoot: "/fixture", electronExecutable: "/electron", expectedBuildSha256: expected,
+    runProvenance: { status: true, invocation: { contract: {} } },
+    tmpRoot: "/tmp", timeoutMs: 100, isolatedEnvironment: () => ({}),
+    prepareProfile: async () => ({ profileRoot: "/profile", artifactsDir: "/artifacts", userDataDir: "/profile/user" }),
+    launch: async () => { launches++; return app; },
+    hashBuild: async () => (++hashes === 1 ? { sha256: expected } : changed),
+    finalizationOptions: {
+      persist: async (diagnostics) => { persisted = JSON.parse(diagnosticsText(diagnostics)); return "/diagnostics.json"; },
+      removeProfile: async () => { removals++; },
+      settleAfterClose: async () => {},
+    },
+  }), /does not match/);
+  assert.equal(launches, 1);
+  assert.equal(scenarios, 1);
+  assert.equal(hashes, 2);
+  assert.equal(removals, 0);
+  assert.equal(persisted.disposition, "FAILURE");
+  assert.equal(persisted.cleanup.verifiedExit, true);
+  assert.deepEqual(persisted.postScenarioBuild, changed);
+  assert.match(persisted.buildVerificationError.message, /does not match/);
 });
 
 test("classifies every Node selection control as diagnostic", () => {
