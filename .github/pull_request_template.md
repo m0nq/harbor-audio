@@ -46,6 +46,22 @@ What user or engineering outcome does this change establish?
 - [ ] Any hosted-CI claim is supported by a successful run against the relevant
       revision; proposed or unexecuted workflows are labeled as such.
 
+## Proof classification and milestones
+
+- Development-slice recommendation: REVIEW-READY / GO / HOLD:
+- Exact tested SHA and independently reviewed SHA:
+- Automated domain/Node/JSDOM results:
+- Real native Electron E2E result, runtime/profiles/cleanup provenance:
+- Hosted CI observed run, or NOT CONFIGURED / NOT RUN:
+- Manual keyboard: PASS / FAIL / NOT TESTED / DEFERRED:
+- VoiceOver / screen reader: PASS / FAIL / NOT TESTED / DEFERRED:
+- Usability / visual / authorized real I/O: PASS / FAIL / NOT TESTED / DEFERRED:
+- Deferred-check rationale, owner, and named feature-complete milestone:
+- Early manual exception decision and supporting risk:
+- Milestone product acceptance: DISTINCT / PENDING / ACCEPTED:
+- Human merge authorization: DISTINCT / PENDING / GRANTED:
+- Binding versioned acceptance contract and any approved exception:
+
 ## Validation
 
 ```zsh
