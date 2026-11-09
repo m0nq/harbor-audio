@@ -86,6 +86,31 @@ base SHAs and all affected required checks before issuing acceptance. Perform
 risk-based QA, record lessons learned, and issue a human-facing GO/HOLD
 recommendation; human merge approval remains separate.
 
+## Automated-first QA cadence
+
+For routine, low-risk, explicitly authorized development slices, run exact-SHA
+typecheck, build, all applicable domain/Node/JSDOM/regression tests, and real,
+isolated Electron E2E for affected workflows before fresh independent review.
+Missing required native checks are HOLD, not PASS. Do not weaken or skip tests
+to achieve a favorable disposition. A non-draft PR is the normal review-ready
+handoff when required gates are satisfied; drafts require explicit direction.
+
+Consolidate physical keyboard, VoiceOver where warranted, visual/usability, and
+separately authorized real-I/O QA at a named feature-complete or release-candidate
+milestone. Require an earlier *targeted* human check for consequential risk
+that automation cannot sufficiently address, including data loss, security,
+OS integration, major UX changes, confusing primary journeys, or major
+regressions. Record the rationale, owner, exact affected revision, and expected
+milestone. Report omitted or deferred manual checks as NOT TESTED or DEFERRED,
+never PASS. A green development slice is not milestone product acceptance.
+
+The **approved versioned feature/native acceptance contract still controls**.
+HARBOR-NATIVE-01 v0.2 remains binding for its existing scope until a
+human-approved v0.3 amendment or documented exception becomes effective.
+Prospective proposals in CLO-175 and CLO-176 do not retroactively satisfy
+PR #3/#4 manual gates or authorize changed application behavior. Hosted CI,
+branch protection, integration and human merge approval remain separate.
+
 ## Change-control authority
 
 - Read-only investigation and recommendations do not authorize edits.
