@@ -15,6 +15,18 @@ verification records. It does not replace the linked documents.
 | `EVIDENCE_CAPTURE_PLAN.md` | Evidence procedure | Current | Bounded, non-destructive reference observation rules |
 | `evidence/evidence-manifest.json` | Evidence register | Append-only, traceability-preserving | Evidence provenance, confidence, unresolved behavior, and safety boundaries |
 
+## Cross-branch versioned contracts (not yet integrated)
+
+The approved [HARBOR-WORKFLOW-02 v0.3.1 contract in PR #3](https://github.com/m0nq/harbor-audio/pull/3)
+and [HARBOR-NATIVE-01 v0.2 in PR #4](https://github.com/m0nq/harbor-audio/pull/4)
+currently reside on open, unmerged feature branches; they are not repository-relative
+files in `main` or this governance PR. Their absence here does not cancel their
+approved acceptance obligations. Proposed [native v0.3 in PR #5](https://github.com/m0nq/harbor-audio/pull/5)
+and [UX/workflow v0.1/v0.4 in PR #6](https://github.com/m0nq/harbor-audio/pull/6)
+are separate **unapproved** amendments, not active contract replacements.
+Use the exact reviewed PR revisions for provenance and update this index with
+repository-relative paths only after a separately authorized integration.
+
 The parity matrix remains valid historical reference evidence where it records
 reference observations and linked evidence IDs. Its implementation-status
 fields require reconciliation against current source and acceptance evidence
