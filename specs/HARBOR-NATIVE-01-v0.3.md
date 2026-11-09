@@ -2,7 +2,7 @@
 
 **Status:** Loop 1 amendment candidate; authorized for specification installation and independent review on November 9, 2026. Exact wording and amendment acceptance remain subject to human approval after review. **Not an implementation, merge, or retrospective acceptance authorization.**
 
-**Linear:** [CLO-175](https://linear.app/cloud-city-fest/issue/CLO-175/adopt-automated-first-qa-cadence-with-milestone-based-manual-acceptance), [CLO-160](https://linear.app/cloud-city-fest/issue/CLO-160/restore-repeatable-native-electron-and-accessibility-acceptance).  
+**Linear:** [CLO-175](https://linear.app/cloud-city-fest/issue/CLO-175/adopt-automated-first-qa-cadence-with-milestone-based-manual), [CLO-160](https://linear.app/cloud-city-fest/issue/CLO-160/restore-repeatable-native-electron-and-accessibility-acceptance).  
 **Baseline:** [HARBOR-NATIVE-01 v0.2](HARBOR-NATIVE-01-v0.2.md) from PR #4, head `18d59022203759c627f88b7d246d79c60b614823`.  
 **Contract relationship:** This amendment changes the prospective *timing and disposition* of manual usability/accessibility checks only. It does not erase v0.2 evidence or relax its native runtime, provenance, process-cleanup, or security requirements. Until approved and effective, v0.2 controls.
 
