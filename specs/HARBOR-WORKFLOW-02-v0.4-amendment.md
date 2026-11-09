@@ -32,7 +32,7 @@ The existing statements prohibiting automatic media processing, timers, progress
 
 ### WF-AC11 — QA cadence clarification (conditional)
 
-Preserve accessible completion announcements, focus recovery, semantics and native keyboard automation. Apply [HARBOR-NATIVE-01 v0.3 proposal on CLO-175](https://linear.app/cloud-city-fest/issue/CLO-175/adopt-automated-first-qa-cadence-with-milestone-based-manual-acceptance) *only when independently approved and effective*, including targeted human discovery QA for the major UX change and milestone VoiceOver review as warranted. Until that policy amendment takes effect, the manual accessibility requirements in v0.3.1 and v0.2 remain controlling.
+Preserve accessible completion announcements, focus recovery, semantics and native keyboard automation. Apply [HARBOR-NATIVE-01 v0.3 proposal on CLO-175](https://linear.app/cloud-city-fest/issue/CLO-175/adopt-automated-first-qa-cadence-with-milestone-based-manual) *only when independently approved and effective*, including targeted human discovery QA for the major UX change and milestone VoiceOver review as warranted. Until that policy amendment takes effect, the manual accessibility requirements in v0.3.1 and v0.2 remain controlling.
 
 ### WF-AC13 — No waiver
 
