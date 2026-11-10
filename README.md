@@ -1,16 +1,18 @@
 # Harbor Audio
 
-Harbor Audio is an internal Cloud City desktop product pursuing comprehensive
-functional parity within authorized boundaries. Its current implementation
-stage is a deterministic, fixture-only Electron scaffold for the Browser,
-Converting, and Converted views. It is an original implementation informed by
-bounded observations of an external application; it is not an official AudFree
-product or integration.
+Harbor Audio is an original, privately developed desktop application pursuing
+workflow parity with bounded observations of AudFree, subject to authorized
+security and media-use boundaries. The present implementation is a deterministic,
+fixture-only Electron scaffold for Browser, Converting, and Converted views,
+not a working media converter or proof of reference parity. Real-media behavior
+requires a separate approved specification and implementation authorization;
+Harbor Audio is not an official AudFree product or integration.
 
-The intended portfolio home is the existing Cloud City workspace and CLO team.
-No separate workspace or team is required. Future Linear tickets should use
-native `CLO-*` identifiers while retaining historical `HARBOR-*` milestone
-references for engineering continuity.
+Harbor Audio work is currently tracked in the existing Cloud City Linear
+workspace and CLO team. This is issue-management routing, not evidence of
+Cloud City product ownership. No separate Linear workspace or team is planned;
+future tickets use native `CLO-*` identifiers while retaining historical
+`HARBOR-*` milestone references for engineering continuity.
 
 ## Current maturity
 
@@ -170,8 +172,8 @@ or runtime check was performed without execution evidence.
 
 ## Private-use and distribution status
 
-This repository and application are internal Cloud City work for private,
-authorized use. No public distribution, commercial release, license grant,
-packaging identity, signing identity, or official association with AudFree is
-claimed here. Historical references to AudFree describe the external
-application used as bounded parity evidence only.
+This repository and application are privately developed for authorized use.
+Tracking the work in the Cloud City workspace does not establish separate
+organizational ownership. No public distribution, commercial release, license
+grant, packaging identity, signing identity, or official association with AudFree
+is claimed. AudFree references are bounded external parity evidence only.
