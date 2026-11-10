@@ -114,8 +114,10 @@ A green development slice is not milestone product acceptance.
 The **approved versioned feature/native acceptance contract still controls**.
 HARBOR-NATIVE-01 v0.2 remains binding for its existing scope until a
 human-approved v0.3 amendment or documented exception becomes effective.
-Prospective proposals in CLO-175 and CLO-176 do not retroactively satisfy
-PR #3/#4 manual gates or authorize changed application behavior. Hosted CI,
+Human-approved prospective contracts recorded in CLO-175 and CLO-176 do not
+retroactively satisfy PR #3/#4 manual gates or authorize changed application
+behavior; future slices need separate implementation and integration authority.
+Hosted CI,
 branch protection, integration and human merge approval remain separate.
 
 ## Change-control authority
