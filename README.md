@@ -110,11 +110,14 @@ pnpm test
 /opt/homebrew/bin/node --test test/*.test.mjs
 ```
 
-Run the isolated Electron E2E suite from a macOS desktop session:
-
-```zsh
-/opt/homebrew/bin/node --test e2e/converted-electron.test.mjs
-```
+Native Electron acceptance requires the [approved v0.2 provenance contract](https://github.com/m0nq/harbor-audio/blob/18d59022203759c627f88b7d246d79c60b614823/specs/HARBOR-NATIVE-01-v0.2.md)
+and [PR #4's exact gated native-run procedure](https://github.com/m0nq/harbor-audio/blob/18d59022203759c627f88b7d246d79c60b614823/README.md)
+from an authorized macOS desktop context. That procedure includes a verified
+native-artifact version probe, exact worktree/toolchain/build provenance,
+expected invocation and a direct, non-isolated GUI test runner. A bare
+`node --test e2e/converted-electron.test.mjs` does **not** establish native
+acceptance. Reconcile the PR #4 README details when the stacked PRs integrate;
+do not copy stale commands from another worktree.
 
 The E2E harness launches the physically resolved Electron executable, creates
 test-owned temporary `userData` and `sessionData` paths, and cleans up only
