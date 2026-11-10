@@ -1,9 +1,11 @@
 # Harbor Audio Working Agreement
 
-Harbor Audio is an internal Cloud City desktop product pursuing comprehensive
-functional parity within authorized boundaries. The current delivery stage is
-a deterministic, fixture-only Electron scaffold; fixture-only behavior is the
-present implementation stage, not the permanent product mission.
+Harbor Audio is an original, privately developed desktop application pursuing
+workflow parity with bounded observations of AudFree, within authorized
+security and media-use boundaries. Its present implementation is a deterministic,
+fixture-only Electron scaffold, not a finished media product; a future real-media
+workflow requires separate specification and explicit authorization. Tracking
+work in Cloud City's CLO workspace does not by itself establish product ownership.
 
 The product is informed by bounded observations of an external application. It
 is not an official AudFree product, integration, provider client, or production
@@ -89,11 +91,13 @@ recommendation; human merge approval remains separate.
 ## Automated-first QA cadence
 
 For routine, low-risk, explicitly authorized development slices, run exact-SHA
-typecheck, build, all applicable domain/Node/JSDOM/regression tests, and real,
-isolated Electron E2E for affected workflows before fresh independent review.
-Missing required native checks are HOLD, not PASS. Do not weaken or skip tests
-to achieve a favorable disposition. A non-draft PR is the normal review-ready
-handoff when required gates are satisfied; drafts require explicit direction.
+typecheck, build, all applicable domain/Node/JSDOM/regression tests, and the
+**complete applicable isolated real Electron E2E suite**, including all affected
+native workflows, before fresh independent review. Targeted scenarios support
+diagnosis but never replace the complete required suite. Missing required native
+checks are HOLD, not PASS. Do not weaken or skip tests to achieve a favorable
+disposition. A non-draft PR is the normal review-ready handoff when required
+gates are satisfied; drafts require explicit direction.
 
 Consolidate physical keyboard, VoiceOver where warranted, visual/usability, and
 separately authorized real-I/O QA at a named feature-complete or release-candidate
@@ -102,7 +106,10 @@ that automation cannot sufficiently address, including data loss, security,
 OS integration, major UX changes, confusing primary journeys, or major
 regressions. Record the rationale, owner, exact affected revision, and expected
 milestone. Report omitted or deferred manual checks as NOT TESTED or DEFERRED,
-never PASS. A green development slice is not milestone product acceptance.
+never PASS. A **required** early human check that fails, is unperformed, or remains
+unresolved is **HOLD** unless a separately human-approved, evidence-backed scoped
+exception explicitly changes that gate. Deferral alone cannot establish GO.
+A green development slice is not milestone product acceptance.
 
 The **approved versioned feature/native acceptance contract still controls**.
 HARBOR-NATIVE-01 v0.2 remains binding for its existing scope until a
