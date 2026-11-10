@@ -1,7 +1,8 @@
 # Harbor Audio specification index
 
-Harbor Audio is an internal Cloud City desktop product in the Cloud City
-workspace and CLO team. This index distinguishes normative repository rules,
+Harbor Audio is a privately developed desktop application whose work is tracked
+in the Cloud City Linear workspace and CLO team; that workflow does not itself
+determine product ownership. This index distinguishes normative repository rules,
 current implementation contracts, historical reference evidence, and
 verification records. It does not replace the linked documents.
 
@@ -17,15 +18,21 @@ verification records. It does not replace the linked documents.
 
 ## Cross-branch versioned contracts (not yet integrated)
 
-The approved [HARBOR-WORKFLOW-02 v0.3.1 contract in PR #3](https://github.com/m0nq/harbor-audio/pull/3)
-and [HARBOR-NATIVE-01 v0.2 in PR #4](https://github.com/m0nq/harbor-audio/pull/4)
-currently reside on open, unmerged feature branches; they are not repository-relative
-files in `main` or this governance PR. Their absence here does not cancel their
-approved acceptance obligations. Proposed [native v0.3 in PR #5](https://github.com/m0nq/harbor-audio/pull/5)
-and [UX/workflow v0.1/v0.4 in PR #6](https://github.com/m0nq/harbor-audio/pull/6)
-are separate **unapproved** amendments, not active contract replacements.
-Use the exact reviewed PR revisions for provenance and update this index with
-repository-relative paths only after a separately authorized integration.
+Two approved versioned contracts are on unmerged branches. These exact source
+revisions are the contract authorities until later human-approved amendments:
+
+- **Approved workflow v0.3.1:** [PR #3](https://github.com/m0nq/harbor-audio/pull/3), head `51b7580ac26b670309425b78bafaa6ad80ed3fb5` ([immutable versioned file](https://github.com/m0nq/harbor-audio/blob/51b7580ac26b670309425b78bafaa6ad80ed3fb5/specs/HARBOR-WORKFLOW-02-v0.3.1.md)).
+- **Approved native v0.2:** [PR #4](https://github.com/m0nq/harbor-audio/pull/4), head `18d59022203759c627f88b7d246d79c60b614823` ([immutable versioned file](https://github.com/m0nq/harbor-audio/blob/18d59022203759c627f88b7d246d79c60b614823/specs/HARBOR-NATIVE-01-v0.2.md)).
+
+Separate **unapproved, non-effective** candidates (not superseding the above):
+
+- **Proposed native v0.3:** [PR #5](https://github.com/m0nq/harbor-audio/pull/5), reviewed head `749e7ca55d78ac0244f102f2fe0d94ad7ac161d4` ([immutable candidate](https://github.com/m0nq/harbor-audio/blob/749e7ca55d78ac0244f102f2fe0d94ad7ac161d4/specs/HARBOR-NATIVE-01-v0.3.md)).
+- **Proposed UX v0.1 and workflow v0.4:** [PR #6](https://github.com/m0nq/harbor-audio/pull/6), repaired head `aa17ac159b44362eb3707eb939d23a1d86cfd4e9` ([immutable UX candidate](https://github.com/m0nq/harbor-audio/blob/aa17ac159b44362eb3707eb939d23a1d86cfd4e9/specs/HARBOR-UX-01-v0.1.md), [immutable workflow amendment](https://github.com/m0nq/harbor-audio/blob/aa17ac159b44362eb3707eb939d23a1d86cfd4e9/specs/HARBOR-WORKFLOW-02-v0.4-amendment.md)).
+
+These files are not repository-relative files in `main` or this governance PR.
+Their absence does not cancel approved acceptance obligations. Verify current
+PR heads before review and update this index with repository-relative paths
+only after separately authorized integration.
 
 The parity matrix remains valid historical reference evidence where it records
 reference observations and linked evidence IDs. Its implementation-status
@@ -57,11 +64,12 @@ Unknown reference behavior remains unknown even when a local simulation exists.
 
 ## Linear continuity
 
-Harbor Audio belongs in the existing Cloud City workspace and CLO team. Its
+Harbor Audio is tracked in the existing Cloud City workspace and CLO team;
+that administrative arrangement does not determine product ownership. Its
 proposed initiative is **Harbor Audio — Verified Functional Parity**. Future
-Linear records should receive native `CLO-*` identifiers from Linear and retain
-historical `HARBOR-*` milestone references in their descriptions. This index
-does not create or update Linear records.
+Linear records should receive native `CLO-*` identifiers and retain historical
+`HARBOR-*` milestone references for continuity. This index does not create or
+update Linear records.
 
 `CONVERTED_RENDERER_SDD.md` remains historically scoped to Converted filtering.
 It does not claim to have originally specified later sorting, Browser session
