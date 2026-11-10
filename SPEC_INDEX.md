@@ -24,10 +24,16 @@ revisions are the contract authorities until later human-approved amendments:
 - **Approved workflow v0.3.1:** [PR #3](https://github.com/m0nq/harbor-audio/pull/3), head `51b7580ac26b670309425b78bafaa6ad80ed3fb5` ([immutable versioned file](https://github.com/m0nq/harbor-audio/blob/51b7580ac26b670309425b78bafaa6ad80ed3fb5/specs/HARBOR-WORKFLOW-02-v0.3.1.md)).
 - **Approved native v0.2:** [PR #4](https://github.com/m0nq/harbor-audio/pull/4), head `18d59022203759c627f88b7d246d79c60b614823` ([immutable versioned file](https://github.com/m0nq/harbor-audio/blob/18d59022203759c627f88b7d246d79c60b614823/specs/HARBOR-NATIVE-01-v0.2.md)).
 
-Separate **unapproved, non-effective** candidates (not superseding the above):
+Separately **human-approved Loop 1 contracts**, not yet integrated or applied retroactively to PRs #3/#4 (the above contracts remain binding for their existing scope):
 
-- **Proposed native v0.3:** [PR #5](https://github.com/m0nq/harbor-audio/pull/5), reviewed head `749e7ca55d78ac0244f102f2fe0d94ad7ac161d4` ([immutable candidate](https://github.com/m0nq/harbor-audio/blob/749e7ca55d78ac0244f102f2fe0d94ad7ac161d4/specs/HARBOR-NATIVE-01-v0.3.md)).
-- **Proposed UX v0.1 and workflow v0.4:** [PR #6](https://github.com/m0nq/harbor-audio/pull/6), repaired head `aa17ac159b44362eb3707eb939d23a1d86cfd4e9` ([immutable UX candidate](https://github.com/m0nq/harbor-audio/blob/aa17ac159b44362eb3707eb939d23a1d86cfd4e9/specs/HARBOR-UX-01-v0.1.md), [immutable workflow amendment](https://github.com/m0nq/harbor-audio/blob/aa17ac159b44362eb3707eb939d23a1d86cfd4e9/specs/HARBOR-WORKFLOW-02-v0.4-amendment.md)).
+- **Approved prospective native v0.3:** [PR #5](https://github.com/m0nq/harbor-audio/pull/5), reviewed head `749e7ca55d78ac0244f102f2fe0d94ad7ac161d4` ([immutable candidate](https://github.com/m0nq/harbor-audio/blob/749e7ca55d78ac0244f102f2fe0d94ad7ac161d4/specs/HARBOR-NATIVE-01-v0.3.md)).
+- **Approved prospective UX v0.1 and workflow v0.4:** [PR #6](https://github.com/m0nq/harbor-audio/pull/6), repaired head `aa17ac159b44362eb3707eb939d23a1d86cfd4e9` ([immutable UX candidate](https://github.com/m0nq/harbor-audio/blob/aa17ac159b44362eb3707eb939d23a1d86cfd4e9/specs/HARBOR-UX-01-v0.1.md), [immutable workflow amendment](https://github.com/m0nq/harbor-audio/blob/aa17ac159b44362eb3707eb939d23a1d86cfd4e9/specs/HARBOR-WORKFLOW-02-v0.4-amendment.md)).
+
+Human ratification of these two exact specification revisions is recorded in
+[CLO-175](https://linear.app/cloud-city-fest/issue/CLO-175/adopt-automated-first-qa-cadence-with-milestone-based-manual)
+and [CLO-176](https://linear.app/cloud-city-fest/issue/CLO-176/simplify-harbor-audios-primary-browser-to-converted-user-journey)
+on November 9, 2026. Approval alone does not authorize application changes,
+retrospective acceptance, native/VoiceOver waivers, or merging.
 
 These files are not repository-relative files in `main` or this governance PR.
 Their absence does not cancel approved acceptance obligations. Verify current
