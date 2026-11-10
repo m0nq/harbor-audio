@@ -179,8 +179,14 @@ pnpm run typecheck
 pnpm run build
 pnpm test
 /opt/homebrew/bin/node --test test/*.test.mjs
-/opt/homebrew/bin/node --test e2e/converted-electron.test.mjs
 ```
+
+Native Electron E2E requires the approved exact-SHA, provenance-gated macOS
+procedure in [HARBOR-NATIVE-01 v0.2](https://github.com/m0nq/harbor-audio/blob/18d59022203759c627f88b7d246d79c60b614823/specs/HARBOR-NATIVE-01-v0.2.md)
+and the [PR #4 native run guidance](https://github.com/m0nq/harbor-audio/blob/18d59022203759c627f88b7d246d79c60b614823/README.md).
+A bare `node --test e2e/converted-electron.test.mjs` is **not** a native
+acceptance command; the approved procedure requires verified environment,
+artifact and invocation, including its direct, non-isolated GUI test runner.
 
 The native Electron suite is separate from Node/JSDOM CI. Physical keyboard,
 VoiceOver, screen-reader, and other manual acceptance must be reported
