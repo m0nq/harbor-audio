@@ -2,7 +2,8 @@
 
 **Status:** Loop 1 specification candidate; authorized for documentation and independent review November 9, 2026. Exact behavioral contract and implementation remain subject to separate approval.  
 **Linear:** [CLO-176](https://linear.app/cloud-city-fest/issue/CLO-176/simplify-harbor-audios-primary-browser-to-converted-user-journey).  
-**Implementation baseline:** PR #4 head `18d59022203759c627f88b7d246d79c60b614823`, incorporating PR #3 head `51b7580ac26b670309425b78bafaa6ad80ed3fb5`.  
+**Proposal branch base:** PR #3 head `51b7580ac26b670309425b78bafaa6ad80ed3fb5` (PR #6 is stacked on PR #3; PR #4 commits are **not** in this proposal branch).  
+**Source and usability-evidence baseline:** PR #4 head `18d59022203759c627f88b7d246d79c60b614823`, a separate descendant of PR #3. Evidence cited from PR #4 is observational, not part of PR #6's diff; implementation requires a reconciled base.  
 **Related approved contract:** [HARBOR-WORKFLOW-02 v0.3.1](HARBOR-WORKFLOW-02-v0.3.1.md); proposed companion amendment [v0.4](HARBOR-WORKFLOW-02-v0.4-amendment.md).
 
 ## 1. Outcome
@@ -14,7 +15,7 @@ The application performs **no audio conversion or file output**. “Completed”
 ## 2. Evidence and epistemic boundary
 
 - **Observed reference:** EV-UI-001/002 show Browser and separate Converting/Converted areas; EV-CONVERSION-001 shows partial conversion and history; EV-WORKFLOW-001 leaves retry/cancel unknown.
-- **Observed Harbor usability:** The owner passed bounded navigation and Converted interactions at PR #4's exact head but could not confidently find the add/advance journey.
+- **Owner-reported Harbor usability:** [CLO-176's human-evaluation record](https://linear.app/cloud-city-fest/issue/CLO-176/simplify-harbor-audios-primary-browser-to-converted-user-journey) reports navigation/focus and Converted search/filter/sorting passes but uncertainty finding and evaluating the synthetic add/advance journey at PR #4 head `18d59022203759c627f88b7d246d79c60b614823`. This is a user report documented in Linear, **not** independent native usability proof or evidence that the underlying controls fail.
 - **Implemented Harbor source:** Converting simultaneously shows a canonical fixture list, separate session queue additions, and standalone “Demo lifecycle”; Converted separates completed-session results from synthetic demonstration history.
 - **Unknown reference:** Original source-to-queue gesture, full transition sequence, timing/progress, keyboard behavior and retry/cancel semantics. The proposed UX is an **original Harbor decision**, not proof of AudFree parity.
 
